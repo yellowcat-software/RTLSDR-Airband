@@ -554,6 +554,15 @@ void* demodulate(void* params) {
                         }
                     }
 
+                    // Drive the coherent-AM PLL whenever the IQ is being cleaned
+                    // (OPENING/OPEN/CLOSING). Running through OPENING gives the PLL
+                    // time to lock before should_process_audio() gates the output in.
+                    float coherent_sample = 0.0f;
+                    const bool use_coherent = (fparms->modulation == MOD_AM && fparms->coherent_am.enabled() && channel->needs_raw_iq && fparms->squelch.should_filter_sample());
+                    if (use_coherent) {
+                        coherent_sample = fparms->coherent_am.demodulate(real, imag);
+                    }
+
                     if (fparms->modulation == MOD_AM) {
                         // if squelch is just opening then bootstrip agcavgfast with prior values of wavein
                         if (fparms->squelch.first_open_sample()) {
@@ -576,14 +585,19 @@ void* demodulate(void* params) {
                     // If squelch sees power then do modulation-specific processing
                     if (fparms->squelch.should_process_audio()) {
                         if (fparms->modulation == MOD_AM) {
-                            if (channel->wavein[j] > fparms->squelch.squelch_level()) {
-                                fparms->agcavgfast = fparms->agcavgfast * 0.995f + channel->wavein[j] * 0.005f;
-                            }
+                            if (use_coherent) {
+                                // Coherent demod already produced an AGC-normalized sample.
+                                waveout = coherent_sample;
+                            } else {
+                                if (channel->wavein[j] > fparms->squelch.squelch_level()) {
+                                    fparms->agcavgfast = fparms->agcavgfast * 0.995f + channel->wavein[j] * 0.005f;
+                                }
 
-                            waveout = (channel->wavein[j - AGC_EXTRA] - fparms->agcavgfast) / (fparms->agcavgfast * 1.5f);
-                            if (abs(waveout) > 0.8f) {
-                                waveout *= 0.85f;
-                                fparms->agcavgfast *= 1.15f;
+                                waveout = (channel->wavein[j - AGC_EXTRA] - fparms->agcavgfast) / (fparms->agcavgfast * 1.5f);
+                                if (abs(waveout) > 0.8f) {
+                                    waveout *= 0.85f;
+                                    fparms->agcavgfast *= 1.15f;
+                                }
                             }
                         }
 #ifdef NFM

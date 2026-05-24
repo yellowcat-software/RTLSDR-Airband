@@ -44,6 +44,7 @@
 #include <pulse/stream.h>
 #endif /* WITH_PULSEAUDIO */
 
+#include "demod_coherent.h"
 #include "filters.h"
 #include "input-common.h"  // input_t
 #include "logging.h"
@@ -248,6 +249,7 @@ struct freq_t {
     size_t active_counter;         // count of loops where channel has signal
     NotchFilter notch_filter;      // notch filter - good to remove CTCSS tones
     LowpassFilter lowpass_filter;  // lowpass filter, applied to I/Q after derotation, set at bandwidth/2 to remove out of band noise
+    CoherentAmDemod coherent_am;   // optional Costas-style PLL replacing the AM envelope detector
     enum modulations modulation;
 };
 struct channel_t {

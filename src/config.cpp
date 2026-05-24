@@ -620,6 +620,25 @@ static int parse_channels(libconfig::Setting& chans, device_t* dev, int i) {
                 }
             }
         }
+        if (chans[j].exists("coherent_am")) {
+            libconfig::Setting& settings = chans[j]["coherent_am"];
+            const bool enabled = settings.exists("enabled") ? (bool)settings["enabled"] : false;
+            if (enabled) {
+                const float loop_bw = settings.exists("loop_bandwidth_hz") ? (float)settings["loop_bandwidth_hz"] : 50.0f;
+                const float damping = settings.exists("damping") ? (float)settings["damping"] : 0.707f;
+                if (loop_bw <= 0.0f || damping <= 0.0f) {
+                    cerr << "Configuration error: devices.[" << i << "] channels.[" << j << "]: coherent_am loop_bandwidth_hz (" << loop_bw << ") and damping (" << damping << ") must be > 0\n";
+                    error();
+                }
+                channel->needs_raw_iq = 1;
+                for (int f = 0; f < channel->freq_count; f++) {
+                    if (channel->freqlist[f].modulation != MOD_AM) {
+                        continue;  // coherent demod is meaningful only for AM
+                    }
+                    channel->freqlist[f].coherent_am = CoherentAmDemod(WAVE_RATE, loop_bw, damping);
+                }
+            }
+        }
         if (chans[j].exists("ampfactor")) {
             if (libconfig::Setting::TypeList == chans[j]["ampfactor"].getType()) {
                 for (int f = 0; f < channel->freq_count; f++) {

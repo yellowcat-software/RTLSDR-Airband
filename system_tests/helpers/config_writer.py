@@ -119,6 +119,18 @@ def write_config(
         if ch.get("squelch") is not None:
             lines.append(f"      squelch_snr_threshold = {ch['squelch']:.1f};")
 
+        if ch.get("coherent_am") is not None:
+            cam = ch["coherent_am"]
+            lines.append("      coherent_am = {")
+            lines.append(f"        enabled = {str(cam.get('enabled', True)).lower()};")
+            if "loop_bandwidth_hz" in cam:
+                lines.append(
+                    f"        loop_bandwidth_hz = {cam['loop_bandwidth_hz']:.1f};"
+                )
+            if "damping" in cam:
+                lines.append(f"        damping = {cam['damping']:.3f};")
+            lines.append("      };")
+
         # Build output entries: file outputs use directory+template+append,
         # mixer outputs use name+balance.
         output_entries: list[dict] = []
