@@ -657,6 +657,12 @@ void* demodulate(void* params) {
                         }
                     }
                 }
+                // Audio-side denoise: applied to the WAVE_BATCH samples written by
+                // this iteration of the demod loop, before the output thread reads them.
+                // No-op when wiener/rnnoise.enabled() is false.
+                fparms->wiener.apply(&channel->waveout[AGC_EXTRA], WAVE_BATCH);
+                fparms->rnnoise.apply(&channel->waveout[AGC_EXTRA], WAVE_BATCH);
+
                 memmove(channel->wavein, channel->wavein + WAVE_BATCH, (dev->waveend - WAVE_BATCH) * sizeof(float));
                 if (channel->needs_raw_iq) {
                     memmove(channel->iq_in, channel->iq_in + 2 * WAVE_BATCH, (dev->waveend - WAVE_BATCH) * sizeof(float) * 2);

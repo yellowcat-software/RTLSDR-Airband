@@ -289,6 +289,7 @@ add_library (rtl_airband_base OBJECT
 	logging.cpp
 	filters.cpp
 	demod_coherent.cpp
+	denoise_wiener.cpp
 	helper_functions.cpp
 	${CMAKE_CURRENT_BINARY_DIR}/version.cpp
 	${rtl_airband_extra_sources}
@@ -358,6 +359,7 @@ if(BUILD_UNITTESTS)
 		filters.cpp
 		ctcss.cpp
 		demod_coherent.cpp
+		denoise_wiener.cpp
 		generate_signal.cpp
 		helper_functions.cpp
 	)

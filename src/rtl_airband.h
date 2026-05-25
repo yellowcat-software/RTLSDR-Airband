@@ -45,6 +45,7 @@
 #endif /* WITH_PULSEAUDIO */
 
 #include "demod_coherent.h"
+#include "denoise.h"
 #include "filters.h"
 #include "input-common.h"  // input_t
 #include "logging.h"
@@ -250,6 +251,8 @@ struct freq_t {
     NotchFilter notch_filter;      // notch filter - good to remove CTCSS tones
     LowpassFilter lowpass_filter;  // lowpass filter, applied to I/Q after derotation, set at bandwidth/2 to remove out of band noise
     CoherentAmDemod coherent_am;   // optional Costas-style PLL replacing the AM envelope detector
+    WienerDenoise wiener;          // optional MMSE-LSA spectral denoiser applied to demodulated audio
+    RnnoiseDenoise rnnoise;        // optional learned denoiser applied after Wiener (stub until AUD-8 lands)
     enum modulations modulation;
 };
 struct channel_t {

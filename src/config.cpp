@@ -639,6 +639,26 @@ static int parse_channels(libconfig::Setting& chans, device_t* dev, int i) {
                 }
             }
         }
+        if (chans[j].exists("wiener")) {
+            libconfig::Setting& settings = chans[j]["wiener"];
+            const bool enabled = settings.exists("enabled") ? (bool)settings["enabled"] : false;
+            if (enabled) {
+                const int w_fft = settings.exists("fft_size") ? (int)settings["fft_size"] : 512;
+                const float overlap = settings.exists("overlap") ? (float)settings["overlap"] : 0.5f;
+                const float alpha_dd = settings.exists("alpha_dd") ? (float)settings["alpha_dd"] : 0.98f;
+                const float noise_window_s = settings.exists("noise_window_s") ? (float)settings["noise_window_s"] : 1.5f;
+                const float noise_bias = settings.exists("noise_bias") ? (float)settings["noise_bias"] : 1.5f;
+                const float min_gain_db = settings.exists("min_gain_db") ? (float)settings["min_gain_db"] : -18.0f;
+                if (w_fft < 64 || (w_fft & (w_fft - 1)) != 0 || overlap <= 0.0f || overlap >= 1.0f || alpha_dd < 0.0f || alpha_dd >= 1.0f || noise_window_s <= 0.0f || noise_bias <= 0.0f) {
+                    cerr << "Configuration error: devices.[" << i << "] channels.[" << j << "]: wiener parameters out of range "
+                         << "(fft_size=" << w_fft << " overlap=" << overlap << " alpha_dd=" << alpha_dd << " noise_window_s=" << noise_window_s << " noise_bias=" << noise_bias << ")\n";
+                    error();
+                }
+                for (int f = 0; f < channel->freq_count; f++) {
+                    channel->freqlist[f].wiener = WienerDenoise(WAVE_RATE, w_fft, overlap, alpha_dd, noise_window_s, noise_bias, min_gain_db);
+                }
+            }
+        }
         if (chans[j].exists("ampfactor")) {
             if (libconfig::Setting::TypeList == chans[j]["ampfactor"].getType()) {
                 for (int f = 0; f < channel->freq_count; f++) {

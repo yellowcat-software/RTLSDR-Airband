@@ -131,6 +131,24 @@ def write_config(
                 lines.append(f"        damping = {cam['damping']:.3f};")
             lines.append("      };")
 
+        if ch.get("wiener") is not None:
+            wn = ch["wiener"]
+            lines.append("      wiener = {")
+            lines.append(f"        enabled = {str(wn.get('enabled', True)).lower()};")
+            if "fft_size" in wn:
+                lines.append(f"        fft_size = {int(wn['fft_size'])};")
+            if "overlap" in wn:
+                lines.append(f"        overlap = {wn['overlap']:.3f};")
+            if "alpha_dd" in wn:
+                lines.append(f"        alpha_dd = {wn['alpha_dd']:.4f};")
+            if "noise_window_s" in wn:
+                lines.append(f"        noise_window_s = {wn['noise_window_s']:.3f};")
+            if "noise_bias" in wn:
+                lines.append(f"        noise_bias = {wn['noise_bias']:.3f};")
+            if "min_gain_db" in wn:
+                lines.append(f"        min_gain_db = {wn['min_gain_db']:.2f};")
+            lines.append("      };")
+
         # Build output entries: file outputs use directory+template+append,
         # mixer outputs use name+balance.
         output_entries: list[dict] = []
