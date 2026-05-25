@@ -54,9 +54,26 @@ void mixer_disable(mixer_t* mixer) {
     disable_channel_outputs(&mixer->channel);
 }
 
-int mixer_connect_input(mixer_t* mixer, float ampfactor, float balance) {
+int mixer_connect_input(mixer_t* mixer, float ampfactor, float balance, int wave_rate) {
     if (!mixer) {
         mixer_set_error("mixer is undefined");
+        return (-1);
+    }
+    if (wave_rate <= 0) {
+        mixer_set_error("input wave_rate must be positive");
+        return (-1);
+    }
+    if (mixer->input_count == 0) {
+        // First input dictates the mixer's rate. Propagate to the mixer's
+        // output channel so its waveout buffer is sized/processed correctly.
+        mixer->wave_rate = wave_rate;
+        mixer->wave_batch = wave_rate / 8;
+        mixer->channel.wave_rate = wave_rate;
+        mixer->channel.wave_batch = wave_rate / 8;
+    } else if (mixer->wave_rate != wave_rate) {
+        static char msg[128];
+        snprintf(msg, sizeof(msg), "mixer '%s' inputs must share wave_rate (existing %d, new %d)", mixer->name ? mixer->name : "?", mixer->wave_rate, wave_rate);
+        mixer_set_error(msg);
         return (-1);
     }
     int i = mixer->input_count;
@@ -73,7 +90,7 @@ int mixer_connect_input(mixer_t* mixer, float ampfactor, float balance) {
         mixer->input_mask = (bool*)XREALLOC(mixer->input_mask, (i + 1) * sizeof(bool));
     }
 
-    mixer->inputs[i].wavein = (float*)XCALLOC(WAVE_LEN, sizeof(float));
+    mixer->inputs[i].wavein = (float*)XCALLOC(WAVE_LEN_MAX, sizeof(float));
     if ((pthread_mutex_init(&mixer->inputs[i].mutex, NULL)) != 0) {
         mixer_set_error("failed to initialize input mutex");
         return (-1);
@@ -157,12 +174,26 @@ void mix_waveforms(float* sum, const float* in, float mult, int size) {
 void* mixer_thread(void* param) {
     assert(param != NULL);
     Signal* signal = (Signal*)param;
-    int interval_usec = 1e+6 * WAVE_BATCH / WAVE_RATE / MIX_DIVISOR;
 
     debug_print("Starting mixer thread, signal %p\n", signal);
 
     if (mixer_count <= 0)
         return 0;
+    // Mixer interval is set per-mixer based on its input rate. Use the first
+    // enabled mixer's rate to drive the loop cadence (all configured mixers
+    // typically share a rate; otherwise the loop honors the tightest one).
+    int interval_usec = 0;
+    for (int i = 0; i < mixer_count; i++) {
+        if (mixers[i].wave_rate > 0) {
+            int candidate = (int)(1e+6 * mixers[i].wave_batch / mixers[i].wave_rate / MIX_DIVISOR);
+            if (interval_usec == 0 || candidate < interval_usec) {
+                interval_usec = candidate;
+            }
+        }
+    }
+    if (interval_usec == 0) {
+        interval_usec = (int)(1e+6 * WAVE_BATCH / WAVE_RATE / MIX_DIVISOR);
+    }
 #ifdef DEBUG
     struct timeval ts, te;
     gettimeofday(&ts, NULL);
@@ -176,6 +207,7 @@ void* mixer_thread(void* param) {
             if (mixer->enabled == false)
                 continue;
             channel_t* channel = &mixer->channel;
+            const int batch = mixer->wave_batch > 0 ? mixer->wave_batch : WAVE_BATCH;
 
             if (channel->state == CH_READY) {  // previous output not yet handled by output thread
                 if (--mixer->interval > 0) {
@@ -191,19 +223,19 @@ void* mixer_thread(void* param) {
                 pthread_mutex_lock(&input->mutex);
                 if (mixer->inputs_todo[j] && mixer->input_mask[j] && input->ready) {
                     if (channel->state == CH_DIRTY) {
-                        memset(channel->waveout, 0, WAVE_BATCH * sizeof(float));
+                        memset(channel->waveout, 0, batch * sizeof(float));
                         if (channel->mode == MM_STEREO)
-                            memset(channel->waveout_r, 0, WAVE_BATCH * sizeof(float));
+                            memset(channel->waveout_r, 0, batch * sizeof(float));
                         channel->axcindicate = NO_SIGNAL;
                         channel->state = CH_WORKING;
                     }
                     debug_bulk_print("mixer[%d]: ampleft=%.1f ampright=%.1f\n", i, input->ampfactor * input->ampl, input->ampfactor * input->ampr);
                     if (input->has_signal) {
                         /* left channel */
-                        mix_waveforms(channel->waveout, input->wavein, input->ampfactor * input->ampl, WAVE_BATCH);
+                        mix_waveforms(channel->waveout, input->wavein, input->ampfactor * input->ampl, batch);
                         /* right channel */
                         if (channel->mode == MM_STEREO) {
-                            mix_waveforms(channel->waveout_r, input->wavein, input->ampfactor * input->ampr, WAVE_BATCH);
+                            mix_waveforms(channel->waveout_r, input->wavein, input->ampfactor * input->ampr, batch);
                         }
                         channel->axcindicate = SIGNAL;
                     }

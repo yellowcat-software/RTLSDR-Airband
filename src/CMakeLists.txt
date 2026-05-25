@@ -130,6 +130,15 @@ set(WITH_PROFILING FALSE)
 option(RNNOISE "Enable RNNoise (Mozilla/JM Valin) audio denoise" OFF)
 set(WITH_RNNOISE FALSE)
 
+# MAX_WAVE_RATE caps the per-device `wave_rate` config knob and sizes the
+# static channel audio buffers. Defaults to "0" which lets rtl_airband.h fall
+# back to WAVE_RATE itself (byte-identical buffers); users opting into higher
+# rates rebuild with e.g. -DMAX_WAVE_RATE=24000 or -DMAX_WAVE_RATE=48000.
+set(MAX_WAVE_RATE 0 CACHE STRING "Maximum supported audio wave_rate in Hz (0 = match WAVE_RATE)")
+if(MAX_WAVE_RATE GREATER 0)
+    add_definitions(-DMAX_WAVE_RATE=${MAX_WAVE_RATE})
+endif()
+
 if(RTLSDR)
 	find_package(RTLSDR)
 	if(RTLSDR_FOUND)
@@ -268,6 +277,11 @@ message(STATUS "  - NFM support:\t\t${NFM}")
 message(STATUS "  - PulseAudio:\t\trequested: ${PULSEAUDIO}, enabled: ${WITH_PULSEAUDIO}")
 message(STATUS "  - Profiling:\t\trequested: ${PROFILING}, enabled: ${WITH_PROFILING}")
 message(STATUS "  - RNNoise:\t\trequested: ${RNNOISE}, enabled: ${WITH_RNNOISE}")
+if(MAX_WAVE_RATE GREATER 0)
+    message(STATUS "  - Max wave_rate:\t${MAX_WAVE_RATE} Hz")
+else()
+    message(STATUS "  - Max wave_rate:\tmatches WAVE_RATE (default)")
+endif()
 message(STATUS "  - Icecast TLS support:\t${LIBSHOUT_HAS_TLS}")
 
 if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/config.h)

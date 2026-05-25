@@ -184,7 +184,7 @@ static int parse_outputs(libconfig::Setting& outs, channel_t* channel, int i, in
                 cerr << "Configuration error: devices.[" << i << "] channels.[" << j << "] outputs.[" << o << "]: balance out of allowed range <-1.0;1.0>\n";
                 error();
             }
-            if ((mdata->input = mixer_connect_input(mdata->mixer, ampfactor, balance)) < 0) {
+            if ((mdata->input = mixer_connect_input(mdata->mixer, ampfactor, balance, channel->wave_rate)) < 0) {
                 cerr << "Configuration error: devices.[" << i << "] channels.[" << j << "] outputs.[" << o
                      << "]: "
                         "could not connect to mixer "
@@ -316,6 +316,8 @@ static int parse_channels(libconfig::Setting& chans, device_t* dev, int i) {
             continue;
         }
         channel_t* channel = dev->channels + jj;
+        channel->wave_rate = dev->wave_rate;
+        channel->wave_batch = dev->wave_batch;
         for (int k = 0; k < AGC_EXTRA; k++) {
             channel->wavein[k] = 20;
             channel->waveout[k] = 0.5;
@@ -541,7 +543,7 @@ static int parse_channels(libconfig::Setting& chans, device_t* dev, int i) {
                     } else if (freq < 0) {
                         cerr << "devices.[" << i << "] channels.[" << j << "] freq.[" << f << "]: invalid value for notch: " << freq << ", ignoring\n";
                     } else {
-                        channel->freqlist[f].notch_filter = NotchFilter(freq, WAVE_RATE, q);
+                        channel->freqlist[f].notch_filter = NotchFilter(freq, dev->wave_rate, q);
                     }
                 }
             } else if (libconfig::Setting::TypeFloat == chans[j]["notch"].getType()) {
@@ -557,7 +559,7 @@ static int parse_channels(libconfig::Setting& chans, device_t* dev, int i) {
                     } else if (freq < 0) {
                         cerr << "devices.[" << i << "] channels.[" << j << "]: notch value '" << freq << "' invalid, ignoring\n";
                     } else {
-                        channel->freqlist[f].notch_filter = NotchFilter(freq, WAVE_RATE, q);
+                        channel->freqlist[f].notch_filter = NotchFilter(freq, dev->wave_rate, q);
                     }
                 }
             } else {
@@ -575,7 +577,7 @@ static int parse_channels(libconfig::Setting& chans, device_t* dev, int i) {
                     } else if (freq < 0) {
                         cerr << "devices.[" << i << "] channels.[" << j << "] freq.[" << f << "]: invalid value for ctcss: " << freq << ", ignoring\n";
                     } else {
-                        channel->freqlist[f].squelch.set_ctcss_freq(freq, WAVE_RATE);
+                        channel->freqlist[f].squelch.set_ctcss_freq(freq, dev->wave_rate);
                     }
                 }
             } else if (libconfig::Setting::TypeFloat == chans[j]["ctcss"].getType()) {
@@ -584,7 +586,7 @@ static int parse_channels(libconfig::Setting& chans, device_t* dev, int i) {
                     if (freq <= 0) {
                         cerr << "devices.[" << i << "] channels.[" << j << "]: ctcss value '" << freq << "' invalid, ignoring\n";
                     } else {
-                        channel->freqlist[f].squelch.set_ctcss_freq(freq, WAVE_RATE);
+                        channel->freqlist[f].squelch.set_ctcss_freq(freq, dev->wave_rate);
                     }
                 }
             } else {
@@ -604,7 +606,7 @@ static int parse_channels(libconfig::Setting& chans, device_t* dev, int i) {
                     } else if (bandwidth < 0) {
                         cerr << "devices.[" << i << "] channels.[" << j << "] freq.[" << f << "]: bandwidth value '" << bandwidth << "' invalid, ignoring\n";
                     } else {
-                        channel->freqlist[f].lowpass_filter = LowpassFilter((float)bandwidth / 2, WAVE_RATE);
+                        channel->freqlist[f].lowpass_filter = LowpassFilter((float)bandwidth / 2, dev->wave_rate);
                     }
                 }
             } else {
@@ -615,7 +617,7 @@ static int parse_channels(libconfig::Setting& chans, device_t* dev, int i) {
                     cerr << "devices.[" << i << "] channels.[" << j << "]: bandwidth value '" << bandwidth << "' invalid, ignoring\n";
                 } else {
                     for (int f = 0; f < channel->freq_count; f++) {
-                        channel->freqlist[f].lowpass_filter = LowpassFilter((float)bandwidth / 2, WAVE_RATE);
+                        channel->freqlist[f].lowpass_filter = LowpassFilter((float)bandwidth / 2, dev->wave_rate);
                     }
                 }
             }
@@ -635,7 +637,7 @@ static int parse_channels(libconfig::Setting& chans, device_t* dev, int i) {
                     if (channel->freqlist[f].modulation != MOD_AM) {
                         continue;  // coherent demod is meaningful only for AM
                     }
-                    channel->freqlist[f].coherent_am = CoherentAmDemod(WAVE_RATE, loop_bw, damping);
+                    channel->freqlist[f].coherent_am = CoherentAmDemod(dev->wave_rate, loop_bw, damping);
                 }
             }
         }
@@ -655,7 +657,7 @@ static int parse_channels(libconfig::Setting& chans, device_t* dev, int i) {
                     error();
                 }
                 for (int f = 0; f < channel->freq_count; f++) {
-                    channel->freqlist[f].wiener = WienerDenoise(WAVE_RATE, w_fft, overlap, alpha_dd, noise_window_s, noise_bias, min_gain_db);
+                    channel->freqlist[f].wiener = WienerDenoise(dev->wave_rate, w_fft, overlap, alpha_dd, noise_window_s, noise_bias, min_gain_db);
                 }
             }
         }
@@ -670,7 +672,7 @@ static int parse_channels(libconfig::Setting& chans, device_t* dev, int i) {
                     error();
                 }
                 for (int f = 0; f < channel->freq_count; f++) {
-                    channel->freqlist[f].rnnoise = RnnoiseDenoise(WAVE_RATE, wet);
+                    channel->freqlist[f].rnnoise = RnnoiseDenoise(dev->wave_rate, wet);
                 }
 #else
                 cerr << "Warning: devices.[" << i << "] channels.[" << j << "]: rnnoise.enabled = true but this binary was built without -DRNNOISE=ON; denoise will be a no-op\n";
@@ -705,7 +707,7 @@ static int parse_channels(libconfig::Setting& chans, device_t* dev, int i) {
 
 #ifdef NFM
         if (chans[j].exists("tau")) {
-            channel->alpha = ((int)chans[j]["tau"] == 0 ? 0.0f : exp(-1.0f / (WAVE_RATE * 1e-6 * (int)chans[j]["tau"])));
+            channel->alpha = ((int)chans[j]["tau"] == 0 ? 0.0f : exp(-1.0f / (dev->wave_rate * 1e-6 * (int)chans[j]["tau"])));
         }
 #endif /* NFM */
         libconfig::Setting& outputs = chans[j]["outputs"];
@@ -750,8 +752,8 @@ static int parse_channels(libconfig::Setting& chans, device_t* dev, int i) {
             // - is linear with the error introduced by rounding the value of sample_rate/WAVE_RATE to the nearest integer
             //   (range of -0.5..0.5)
             // - is linear with the distance between center frequency and the channel frequency, normalized to 0..1
-            double decimation_factor = ((double)dev->input->sample_rate / (double)WAVE_RATE);
-            double dm_dphi_correction = (double)WAVE_RATE / 2.0;
+            double decimation_factor = ((double)dev->input->sample_rate / (double)dev->wave_rate);
+            double dm_dphi_correction = (double)dev->wave_rate / 2.0;
             dm_dphi_correction *= (decimation_factor - round(decimation_factor));
             dm_dphi_correction *= (double)(channel->freqlist[0].frequency - dev->input->centerfreq) / ((double)dev->input->sample_rate / 2.0);
 
@@ -759,7 +761,7 @@ static int parse_channels(libconfig::Setting& chans, device_t* dev, int i) {
             dm_dphi -= dm_dphi_correction;
             debug_print("dev[%d].chan[%d]: dm_dphi_corrected: %f Hz\n", i, jj, dm_dphi);
             // Normalize
-            dm_dphi /= (double)WAVE_RATE;
+            dm_dphi /= (double)dev->wave_rate;
             // Unalias it, to prevent overflow of int during cast
             dm_dphi -= trunc(dm_dphi);
             debug_print("dev[%d].chan[%d]: dm_dphi_normalized=%f\n", i, jj, dm_dphi);
@@ -807,10 +809,36 @@ int parse_devices(libconfig::Setting& devs) {
 #endif /* WITH_RTLSDR */
         }
         assert(dev->input != NULL);
+        // Per-device audio sample rate. Defaults to compile-time WAVE_RATE for
+        // backward compatibility; can be raised to capture wider channels.
+        dev->wave_rate = WAVE_RATE;
+        if (devs[i].exists("wave_rate")) {
+            int rate = parse_anynum2int(devs[i]["wave_rate"]);
+            static const int kAllowedRates[] = {8000, 11025, 12000, 16000, 22050, 24000, 32000, 44100, 48000};
+            bool ok = false;
+            for (size_t k = 0; k < sizeof(kAllowedRates) / sizeof(kAllowedRates[0]); ++k) {
+                if (rate == kAllowedRates[k]) {
+                    ok = true;
+                    break;
+                }
+            }
+            if (!ok) {
+                cerr << "Configuration error: devices.[" << i << "]: wave_rate (" << rate << ") must be one of LAME-supported rates: 8000, 11025, 12000, 16000, 22050, 24000, 32000, 44100, 48000\n";
+                error();
+            }
+            if (rate > MAX_WAVE_RATE) {
+                cerr << "Configuration error: devices.[" << i << "]: wave_rate (" << rate << ") exceeds compile-time MAX_WAVE_RATE (" << MAX_WAVE_RATE << "); rebuild with -DMAX_WAVE_RATE=" << rate << "\n";
+                error();
+            }
+            dev->wave_rate = rate;
+        }
+        dev->wave_batch = dev->wave_rate / 8;
+        dev->agc_alpha = expf(-1.0f / (dev->wave_rate * 2e-4f));
+        dev->input->wave_rate = dev->wave_rate;  // mirror so input drivers can size their batches
         if (devs[i].exists("sample_rate")) {
             int sample_rate = parse_anynum2int(devs[i]["sample_rate"]);
-            if (sample_rate < WAVE_RATE) {
-                cerr << "Configuration error: devices.[" << i << "]: sample_rate must be greater than " << WAVE_RATE << "\n";
+            if (sample_rate < dev->wave_rate) {
+                cerr << "Configuration error: devices.[" << i << "]: sample_rate must be greater than wave_rate (" << dev->wave_rate << ")\n";
                 error();
             }
             dev->input->sample_rate = sample_rate;
@@ -832,9 +860,13 @@ int parse_devices(libconfig::Setting& devs) {
         }  // centerfreq for R_SCAN will be set by parse_channels() after frequency list has been read
 #ifdef NFM
         if (devs[i].exists("tau")) {
-            dev->alpha = ((int)devs[i]["tau"] == 0 ? 0.0f : exp(-1.0f / (WAVE_RATE * 1e-6 * (int)devs[i]["tau"])));
-        } else {
+            dev->alpha = ((int)devs[i]["tau"] == 0 ? 0.0f : exp(-1.0f / (dev->wave_rate * 1e-6 * (int)devs[i]["tau"])));
+        } else if (dev->wave_rate == WAVE_RATE) {
+            // Fall back to the global default only when the device runs at the
+            // compile-time rate; otherwise recompute against the device's rate.
             dev->alpha = alpha;
+        } else {
+            dev->alpha = expf(-1.0f / (dev->wave_rate * 2e-4f));
         }
 #endif /* NFM */
 
@@ -848,12 +880,12 @@ int parse_devices(libconfig::Setting& devs) {
         assert(dev->input->sfmt != SFMT_UNDEF);
         assert(dev->input->fullscale > 0);
         assert(dev->input->bytes_per_sample > 0);
-        assert(dev->input->sample_rate > WAVE_RATE);
+        assert(dev->input->sample_rate > dev->wave_rate);
 
         // For the input buffer size use a base value and round it up to the nearest multiple
         // of FFT_BATCH blocks of input samples.
-        // ceil is required here because sample rate is not guaranteed to be an integer multiple of WAVE_RATE.
-        size_t fft_batch_len = FFT_BATCH * (2 * dev->input->bytes_per_sample * (size_t)ceil((double)dev->input->sample_rate / (double)WAVE_RATE));
+        // ceil is required here because sample rate is not guaranteed to be an integer multiple of wave_rate.
+        size_t fft_batch_len = FFT_BATCH * (2 * dev->input->bytes_per_sample * (size_t)ceil((double)dev->input->sample_rate / (double)dev->wave_rate));
         dev->input->buf_size = MIN_BUF_SIZE;
         if (dev->input->buf_size % fft_batch_len != 0)
             dev->input->buf_size += fft_batch_len - dev->input->buf_size % fft_batch_len;
@@ -907,6 +939,8 @@ int parse_mixers(libconfig::Setting& mx) {
         mixer->name = strdup(name);
         mixer->enabled = false;
         mixer->interval = MIX_DIVISOR;
+        mixer->wave_rate = 0;   // set when the first input connects
+        mixer->wave_batch = 0;
         mixer->output_overrun_count = 0;
         mixer->input_count = 0;
         mixer->inputs = NULL;
@@ -916,6 +950,12 @@ int parse_mixers(libconfig::Setting& mx) {
         channel->highpass = mx[i].exists("highpass") ? (int)mx[i]["highpass"] : 100;
         channel->lowpass = mx[i].exists("lowpass") ? (int)mx[i]["lowpass"] : 2500;
         channel->mode = MM_MONO;
+        // The mixer's output channel runs at the input rate; this is propagated
+        // from the first connected input during mixer_connect_input(). Until
+        // then leave wave_rate/wave_batch at 0 so output_t init can pick them
+        // up lazily.
+        channel->wave_rate = 0;
+        channel->wave_batch = 0;
 
         // Make sure lowpass / highpass aren't flipped.
         // If lowpass is enabled (greater than zero) it must be larger than highpass

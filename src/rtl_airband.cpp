@@ -270,20 +270,20 @@ void init_demod(demod_params_t* params, Signal* signal, int device_start, int de
 
 bool init_output(channel_t* channel, output_t* output) {
     if (output->has_mp3_output) {
-        output->lame = airlame_init(channel->mode, channel->highpass, channel->lowpass);
+        output->lame = airlame_init(channel->mode, channel->highpass, channel->lowpass, channel->wave_rate);
         output->lamebuf = (unsigned char*)malloc(sizeof(unsigned char) * LAMEBUF_SIZE);
     }
     if (output->type == O_ICECAST) {
         shout_setup((icecast_data*)(output->data), channel->mode);
     } else if (output->type == O_UDP_STREAM) {
         udp_stream_data* sdata = (udp_stream_data*)(output->data);
-        if (!udp_stream_init(sdata, channel->mode, (size_t)WAVE_BATCH * sizeof(float))) {
+        if (!udp_stream_init(sdata, channel->mode, (size_t)channel->wave_batch * sizeof(float), channel->wave_rate)) {
             return false;
         }
 #ifdef WITH_PULSEAUDIO
     } else if (output->type == O_PULSE) {
         pulse_init();
-        pulse_setup((pulse_data*)(output->data), channel->mode);
+        pulse_setup((pulse_data*)(output->data), channel->mode, channel->wave_rate);
 #endif /* WITH_PULSEAUDIO */
     }
 
@@ -416,7 +416,7 @@ void* demodulate(void* params) {
         }
 
         // number of input bytes per output wave sample (x 2 for I and Q)
-        size_t bps = 2 * dev->input->bytes_per_sample * (size_t)round((double)dev->input->sample_rate / (double)WAVE_RATE);
+        size_t bps = 2 * dev->input->bytes_per_sample * (size_t)round((double)dev->input->sample_rate / (double)dev->wave_rate);
         if (available < bps * FFT_BATCH + fft_size * dev->input->bytes_per_sample * 2) {
             // move to next device
             device_num = next_device(demod_params, device_num);
@@ -516,7 +516,7 @@ void* demodulate(void* params) {
 
         dev->waveend += FFT_BATCH;
 
-        if (dev->waveend >= WAVE_BATCH + AGC_EXTRA) {
+        if (dev->waveend >= dev->wave_batch + AGC_EXTRA) {
             for (int i = 0; i < dev->channel_count; i++) {
                 AFC afc(dev, i);
                 channel_t* channel = dev->channels + i;
@@ -525,7 +525,7 @@ void* demodulate(void* params) {
                 // set to NO_SIGNAL, will be updated to SIGNAL based on squelch below
                 channel->axcindicate = NO_SIGNAL;
 
-                for (int j = AGC_EXTRA; j < WAVE_BATCH + AGC_EXTRA; j++) {
+                for (int j = AGC_EXTRA; j < dev->wave_batch + AGC_EXTRA; j++) {
                     float& real = channel->iq_in[2 * (j - AGC_EXTRA)];
                     float& imag = channel->iq_in[2 * (j - AGC_EXTRA) + 1];
 
@@ -657,15 +657,15 @@ void* demodulate(void* params) {
                         }
                     }
                 }
-                // Audio-side denoise: applied to the WAVE_BATCH samples written by
+                // Audio-side denoise: applied to the dev->wave_batch samples written by
                 // this iteration of the demod loop, before the output thread reads them.
                 // No-op when wiener/rnnoise.enabled() is false.
-                fparms->wiener.apply(&channel->waveout[AGC_EXTRA], WAVE_BATCH);
-                fparms->rnnoise.apply(&channel->waveout[AGC_EXTRA], WAVE_BATCH);
+                fparms->wiener.apply(&channel->waveout[AGC_EXTRA], dev->wave_batch);
+                fparms->rnnoise.apply(&channel->waveout[AGC_EXTRA], dev->wave_batch);
 
-                memmove(channel->wavein, channel->wavein + WAVE_BATCH, (dev->waveend - WAVE_BATCH) * sizeof(float));
+                memmove(channel->wavein, channel->wavein + dev->wave_batch, (dev->waveend - dev->wave_batch) * sizeof(float));
                 if (channel->needs_raw_iq) {
-                    memmove(channel->iq_in, channel->iq_in + 2 * WAVE_BATCH, (dev->waveend - WAVE_BATCH) * sizeof(float) * 2);
+                    memmove(channel->iq_in, channel->iq_in + 2 * dev->wave_batch, (dev->waveend - dev->wave_batch) * sizeof(float) * 2);
                 }
 
 #ifdef WITH_BCM_VC
@@ -697,7 +697,7 @@ void* demodulate(void* params) {
             } else {
                 dev->waveavail = 1;
             }
-            dev->waveend -= WAVE_BATCH;
+            dev->waveend -= dev->wave_batch;
 #ifdef DEBUG
             gettimeofday(&te, NULL);
             debug_bulk_print("waveavail %lu.%lu %lu\n", te.tv_sec, (unsigned long)te.tv_usec, (te.tv_sec - ts.tv_sec) * 1000000UL + te.tv_usec - ts.tv_usec);

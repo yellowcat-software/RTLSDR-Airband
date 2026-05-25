@@ -72,9 +72,22 @@
 #define WAVE_RATE 8000
 #endif /* NFM */
 
-#define WAVE_BATCH WAVE_RATE / 8
+// MAX_WAVE_RATE caps the per-device `wave_rate` config knob and sizes the
+// static channel buffers below. CMake exposes it as a cache var; default
+// matches WAVE_RATE so existing builds get byte-identical buffer sizes,
+// and users opting into higher rates rebuild with e.g. -DMAX_WAVE_RATE=24000.
+#ifndef MAX_WAVE_RATE
+#define MAX_WAVE_RATE WAVE_RATE
+#endif
+#if MAX_WAVE_RATE < WAVE_RATE
+#error "MAX_WAVE_RATE must be >= WAVE_RATE"
+#endif
+
+#define WAVE_BATCH (WAVE_RATE / 8)
+#define MAX_WAVE_BATCH (MAX_WAVE_RATE / 8)
 #define AGC_EXTRA 100
-#define WAVE_LEN 2 * WAVE_BATCH + AGC_EXTRA
+#define WAVE_LEN (2 * WAVE_BATCH + AGC_EXTRA)
+#define WAVE_LEN_MAX (2 * MAX_WAVE_BATCH + AGC_EXTRA)
 #define MP3_RATE 8000
 #define MAX_SHOUT_QUEUELEN 32768
 #define TAG_QUEUE_LEN 16
@@ -172,6 +185,7 @@ struct pulse_data {
     pa_channel_map lmap, rmap;
     mix_modes mode;
     bool continuous;
+    int rate;  // PulseAudio sink rate (= channel's wave_rate)
 };
 #endif /* WITH_PULSEAUDIO */
 
@@ -256,11 +270,13 @@ struct freq_t {
     enum modulations modulation;
 };
 struct channel_t {
-    float wavein[WAVE_LEN];      // FFT output waveform
-    float waveout[WAVE_LEN];     // waveform after squelch + AGC (left/center channel mixer output)
-    float waveout_r[WAVE_LEN];   // right channel mixer output
-    float iq_in[2 * WAVE_LEN];   // raw input samples for I/Q outputs and NFM demod
-    float iq_out[2 * WAVE_LEN];  // raw output samples for I/Q outputs (FIXME: allocate only if required)
+    int wave_rate;               // audio sample rate carried down from the parent device
+    int wave_batch;              // wave_rate / 8 — samples produced per demod cycle
+    float wavein[WAVE_LEN_MAX];  // FFT output waveform (sized for MAX_WAVE_RATE; first `2*wave_batch+AGC_EXTRA` samples used)
+    float waveout[WAVE_LEN_MAX];     // waveform after squelch + AGC (left/center channel mixer output)
+    float waveout_r[WAVE_LEN_MAX];   // right channel mixer output
+    float iq_in[2 * WAVE_LEN_MAX];   // raw input samples for I/Q outputs and NFM demod
+    float iq_out[2 * WAVE_LEN_MAX];  // raw output samples for I/Q outputs (FIXME: allocate only if required)
 #ifdef NFM
     float pr;            // previous sample - real part
     float pj;            // previous sample - imaginary part
@@ -286,6 +302,9 @@ struct channel_t {
 enum rec_modes { R_MULTICHANNEL, R_SCAN };
 struct device_t {
     input_t* input;
+    int wave_rate;   // per-device audio sample rate (defaults to compile-time WAVE_RATE)
+    int wave_batch;  // wave_rate / 8 — cached for the demod loop
+    float agc_alpha; // exp(-1.0f / (wave_rate * 2e-4)) — AGC time constant, per-device
 #ifdef NFM
     float alpha;
 #endif /* NFM */
@@ -320,6 +339,8 @@ struct mixer_t {
     const char* name;
     bool enabled;
     int interval;
+    int wave_rate;   // rate of the inputs feeding this mixer (all must agree)
+    int wave_batch;  // wave_rate / 8
     size_t output_overrun_count;
     int input_count;
     mixinput_t* inputs;
@@ -352,7 +373,7 @@ struct output_params_t {
 extern char const* RTL_AIRBAND_VERSION;
 
 // output.cpp
-lame_t airlame_init(mix_modes mixmode, int highpass, int lowpass);
+lame_t airlame_init(mix_modes mixmode, int highpass, int lowpass, int wave_rate);
 void shout_setup(icecast_data* icecast, mix_modes mixmode);
 void disable_device_outputs(device_t* dev);
 void disable_channel_outputs(channel_t* channel);
@@ -393,7 +414,7 @@ float level_to_dBFS(const float& level);
 
 // mixer.cpp
 mixer_t* getmixerbyname(const char* name);
-int mixer_connect_input(mixer_t* mixer, float ampfactor, float balance);
+int mixer_connect_input(mixer_t* mixer, float ampfactor, float balance, int wave_rate);
 void mixer_disable_input(mixer_t* mixer, int input_idx);
 void mixer_put_samples(mixer_t* mixer, int input_idx, const float* samples, bool has_signal, unsigned int len);
 void* mixer_thread(void* params);
@@ -404,7 +425,7 @@ int parse_devices(libconfig::Setting& devs);
 int parse_mixers(libconfig::Setting& mx);
 
 // udp_stream.cpp
-bool udp_stream_init(udp_stream_data* sdata, mix_modes mode, size_t len);
+bool udp_stream_init(udp_stream_data* sdata, mix_modes mode, size_t len, int rate);
 void udp_stream_write(udp_stream_data* sdata, const float* data, size_t len);
 void udp_stream_write(udp_stream_data* sdata, const float* data_left, const float* data_right, size_t len);
 void udp_stream_shutdown(udp_stream_data* sdata);
@@ -413,7 +434,7 @@ void udp_stream_shutdown(udp_stream_data* sdata);
 #define PULSE_STREAM_LATENCY_LIMIT 10000000UL
 // pulse.cpp
 void pulse_init();
-int pulse_setup(pulse_data* pdata, mix_modes mixmode);
+int pulse_setup(pulse_data* pdata, mix_modes mixmode, int rate);
 void pulse_start();
 void pulse_shutdown(pulse_data* pdata);
 void pulse_write_stream(pulse_data* pdata, mix_modes mode, const float* data_left, const float* data_right, size_t len);

@@ -119,14 +119,15 @@ fail:
 }
 
 static void pulse_setup_streams(pulse_data* pdata) {
+    const uint32_t rate = pdata->rate > 0 ? (uint32_t)pdata->rate : (uint32_t)WAVE_RATE;
     const pa_sample_spec ss = {
 #if __cplusplus >= 199711L
         .format = PA_SAMPLE_FLOAT32LE,
-        .rate = WAVE_RATE,
+        .rate = rate,
         .channels = 1
 #else  // for g++ 4.6 (eg. Raspbian Wheezy)
         PA_SAMPLE_FLOAT32LE,
-        WAVE_RATE,
+        rate,
         1
 #endif /* __cplusplus */
     };
@@ -174,12 +175,13 @@ void pulse_init() {
     }
 }
 
-int pulse_setup(pulse_data* pdata, mix_modes mixmode) {
+int pulse_setup(pulse_data* pdata, mix_modes mixmode, int rate) {
     if (!(pdata->context = pa_context_new(pa_threaded_mainloop_get_api(mainloop), pdata->name))) {
         log(LOG_ERR, "%s", "pulse: failed to create context\n");
         return -1;
     }
     pdata->mode = mixmode;
+    pdata->rate = rate;
     PA_LOOP_LOCK(mainloop);
     int ret = 0;
     pa_context_set_state_callback(pdata->context, &pulse_ctx_state_cb, pdata);

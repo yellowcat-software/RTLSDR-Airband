@@ -26,7 +26,7 @@
 
 #include "rtl_airband.h"
 
-bool udp_stream_init(udp_stream_data* sdata, mix_modes mode, size_t len) {
+bool udp_stream_init(udp_stream_data* sdata, mix_modes mode, size_t len, int rate) {
     // pre-allocate the stereo buffer
     if (mode == MM_STEREO) {
         sdata->stereo_buffer_len = len * 2;
@@ -79,7 +79,7 @@ bool udp_stream_init(udp_stream_data* sdata, mix_modes mode, size_t len) {
         return false;
     }
 
-    log(LOG_INFO, "udp_stream: sending %s 32-bit float at %d Hz to %s:%s\n", mode == MM_MONO ? "Mono" : "Stereo", WAVE_RATE, sdata->dest_address, sdata->dest_port);
+    log(LOG_INFO, "udp_stream: sending %s 32-bit float at %d Hz to %s:%s\n", mode == MM_MONO ? "Mono" : "Stereo", rate > 0 ? rate : WAVE_RATE, sdata->dest_address, sdata->dest_port);
     return true;
 }
 

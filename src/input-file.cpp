@@ -91,8 +91,10 @@ void* file_rx_thread(void* ctx) {
 
     // Read at most one audio batch worth of input data per chunk so the demod
     // never accumulates more than one batch before the output thread runs (ie overwrite).
-    size_t bps_per_iter = 2 * input->bytes_per_sample * (size_t)round((double)input->sample_rate / (double)WAVE_RATE);
-    size_t one_batch_bytes = (size_t)WAVE_BATCH * bps_per_iter;
+    const int wave_rate = input->wave_rate > 0 ? input->wave_rate : WAVE_RATE;
+    const int wave_batch = wave_rate / 8;
+    size_t bps_per_iter = 2 * input->bytes_per_sample * (size_t)round((double)input->sample_rate / (double)wave_rate);
+    size_t one_batch_bytes = (size_t)wave_batch * bps_per_iter;
     size_t max_buf_len = (input->buf_size / 2) - 1;
     size_t buf_len = (one_batch_bytes < max_buf_len) ? one_batch_bytes : max_buf_len;
     unsigned char* buf = (unsigned char*)XCALLOC(1, buf_len);

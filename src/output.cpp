@@ -144,14 +144,14 @@ void shout_setup(icecast_data* icecast, mix_modes mixmode) {
     }
 }
 
-lame_t airlame_init(mix_modes mixmode, int highpass, int lowpass) {
+lame_t airlame_init(mix_modes mixmode, int highpass, int lowpass, int wave_rate) {
     lame_t lame = lame_init();
     if (!lame) {
         log(LOG_WARNING, "lame_init failed\n");
         return NULL;
     }
 
-    lame_set_in_samplerate(lame, WAVE_RATE);
+    lame_set_in_samplerate(lame, wave_rate > 0 ? wave_rate : WAVE_RATE);
     lame_set_VBR(lame, vbr_mtrh);
     lame_set_brate(lame, 16);
     lame_set_quality(lame, 7);
@@ -175,23 +175,23 @@ class LameTone {
     int _bytes;
 
    public:
-    LameTone(mix_modes mixmode, int msec, unsigned int hz = 0) : _data(NULL), _bytes(0) {
+    LameTone(mix_modes mixmode, int wave_rate, int msec, unsigned int hz = 0) : _data(NULL), _bytes(0) {
         _data = (unsigned char*)XCALLOC(1, LAMEBUF_SIZE);
 
-        int samples = (msec * WAVE_RATE) / 1000;
+        int samples = (msec * wave_rate) / 1000;
         float* buf = (float*)XCALLOC(samples, sizeof(float));
 
-        debug_print("LameTone with mixmode=%s msec=%d hz=%u\n", mixmode == MM_STEREO ? "MM_STEREO" : "MM_MONO", msec, hz);
+        debug_print("LameTone with mixmode=%s rate=%d msec=%d hz=%u\n", mixmode == MM_STEREO ? "MM_STEREO" : "MM_MONO", wave_rate, msec, hz);
         if (hz > 0) {
             const float period = 1.0 / (float)hz;
-            const float sample_time = 1.0 / (float)WAVE_RATE;
+            const float sample_time = 1.0 / (float)wave_rate;
             float t = 0;
             for (int i = 0; i < samples; ++i, t += sample_time) {
                 buf[i] = 0.9 * sinf(t * 2.0 * M_PI / period);
             }
         } else
             memset(buf, 0, samples * sizeof(float));
-        lame_t lame = airlame_init(mixmode, 0, 0);
+        lame_t lame = airlame_init(mixmode, 0, 0, wave_rate);
         if (lame) {
             _bytes = lame_encode_buffer_ieee_float(lame, buf, (mixmode == MM_STEREO ? buf : NULL), samples, _data, LAMEBUF_SIZE);
             if (_bytes > 0) {
@@ -247,7 +247,7 @@ int rename_if_exists(char const* oldpath, char const* newpath) {
  * If appending to an audio file, insert discontinuity indictor tones
  * as well as the appropriate amount of silence when in continuous mode.
  */
-static int open_file(file_data* fdata, mix_modes mixmode, int is_audio) {
+static int open_file(file_data* fdata, mix_modes mixmode, int is_audio, int wave_rate) {
     int rename_result = rename_if_exists(fdata->file_path.c_str(), fdata->file_path_tmp.c_str());
     if (fdata->append) {
         // Open without O_APPEND so fseek+fwrite works correctly (e.g. for the lametag).
@@ -284,9 +284,9 @@ static int open_file(file_data* fdata, mix_modes mixmode, int is_audio) {
 
     if (is_audio) {
         // fill missing space with marker tones
-        LameTone lt_a(mixmode, 120, 2222);
-        LameTone lt_b(mixmode, 120, 1111);
-        LameTone lt_c(mixmode, 120, 555);
+        LameTone lt_a(mixmode, wave_rate, 120, 2222);
+        LameTone lt_b(mixmode, wave_rate, 120, 1111);
+        LameTone lt_c(mixmode, wave_rate, 120, 555);
 
         int r = lt_a.write(fdata->f);
         if (r == 0)
@@ -303,7 +303,7 @@ static int open_file(file_data* fdata, mix_modes mixmode, int is_audio) {
                     log(LOG_WARNING, "Too big time difference: %llu sec, limiting to one hour\n", (unsigned long long)delta);
                     delta = 3600;
                 }
-                LameTone lt_silence(mixmode, 1000);
+                LameTone lt_silence(mixmode, wave_rate, 1000);
                 for (; (r == 0 && delta > 1); --delta)
                     r = lt_silence.write(fdata->f);
             }
@@ -468,7 +468,7 @@ static bool output_file_ready(channel_t* channel, output_t* output) {
     fdata->open_time = fdata->last_write_time = current_time;
 
     const int is_audio = output->type == O_RAWFILE ? 0 : 1;
-    if (open_file(fdata, channel->mode, is_audio) < 0) {
+    if (open_file(fdata, channel->mode, is_audio, channel->wave_rate) < 0) {
         log(LOG_WARNING, "Cannot open output file %s (%s)\n", fdata->file_path_tmp.c_str(), strerror(errno));
         return false;
     }
@@ -489,7 +489,7 @@ void process_outputs(channel_t* channel, int cur_scan_freq) {
             // encode and send mp3 to shoutcast output
             const auto& lame = channel->outputs[k].lame;
             const auto& lamebuf = channel->outputs[k].lamebuf;
-            int mp3_bytes = lame_encode_buffer_ieee_float(lame, channel->waveout, (channel->mode == MM_STEREO ? channel->waveout_r : NULL), WAVE_BATCH, lamebuf, LAMEBUF_SIZE);
+            int mp3_bytes = lame_encode_buffer_ieee_float(lame, channel->waveout, (channel->mode == MM_STEREO ? channel->waveout_r : NULL), channel->wave_batch, lamebuf, LAMEBUF_SIZE);
             if (mp3_bytes < 0) {
                 log(LOG_WARNING, "lame_encode_buffer_ieee_float: %d\n", mp3_bytes);
             }
@@ -545,7 +545,7 @@ void process_outputs(channel_t* channel, int cur_scan_freq) {
             const auto& lamebuf = channel->outputs[k].lamebuf;
             int mp3_bytes = 0;
             if (channel->outputs[k].type == O_FILE) {
-                mp3_bytes = lame_encode_buffer_ieee_float(lame, channel->waveout, (channel->mode == MM_STEREO ? channel->waveout_r : NULL), WAVE_BATCH, lamebuf, LAMEBUF_SIZE);
+                mp3_bytes = lame_encode_buffer_ieee_float(lame, channel->waveout, (channel->mode == MM_STEREO ? channel->waveout_r : NULL), channel->wave_batch, lamebuf, LAMEBUF_SIZE);
                 if (mp3_bytes < 0) {
                     log(LOG_WARNING, "lame_encode_buffer_ieee_float: %d\n", mp3_bytes);
                 }
@@ -560,7 +560,7 @@ void process_outputs(channel_t* channel, int cur_scan_freq) {
                 buflen = (size_t)mp3_bytes;
                 written = fwrite(lamebuf, 1, buflen, fdata->f);
             } else if (channel->outputs[k].type == O_RAWFILE) {
-                buflen = 2 * sizeof(float) * WAVE_BATCH;
+                buflen = 2 * sizeof(float) * channel->wave_batch;
                 written = fwrite(channel->iq_out, 1, buflen, fdata->f);
             }
             if (written < buflen) {
@@ -575,7 +575,7 @@ void process_outputs(channel_t* channel, int cur_scan_freq) {
             gettimeofday(&fdata->last_write_time, NULL);
         } else if (channel->outputs[k].type == O_MIXER) {
             mixer_data* mdata = (mixer_data*)(channel->outputs[k].data);
-            mixer_put_samples(mdata->mixer, mdata->input, channel->waveout, channel->axcindicate != NO_SIGNAL, WAVE_BATCH);
+            mixer_put_samples(mdata->mixer, mdata->input, channel->waveout, channel->axcindicate != NO_SIGNAL, channel->wave_batch);
         } else if (channel->outputs[k].type == O_UDP_STREAM) {
             udp_stream_data* sdata = (udp_stream_data*)channel->outputs[k].data;
 
@@ -584,9 +584,9 @@ void process_outputs(channel_t* channel, int cur_scan_freq) {
             }
 
             if (channel->mode == MM_MONO) {
-                udp_stream_write(sdata, channel->waveout, (size_t)WAVE_BATCH * sizeof(float));
+                udp_stream_write(sdata, channel->waveout, (size_t)channel->wave_batch * sizeof(float));
             } else {
-                udp_stream_write(sdata, channel->waveout, channel->waveout_r, (size_t)WAVE_BATCH * sizeof(float));
+                udp_stream_write(sdata, channel->waveout, channel->waveout_r, (size_t)channel->wave_batch * sizeof(float));
             }
 
 #ifdef WITH_PULSEAUDIO
@@ -595,7 +595,7 @@ void process_outputs(channel_t* channel, int cur_scan_freq) {
             if (pdata->continuous == false && channel->axcindicate == NO_SIGNAL)
                 continue;
 
-            pulse_write_stream(pdata, channel->mode, channel->waveout, channel->waveout_r, (size_t)WAVE_BATCH * sizeof(float));
+            pulse_write_stream(pdata, channel->mode, channel->waveout, channel->waveout_r, (size_t)channel->wave_batch * sizeof(float));
 #endif /* WITH_PULSEAUDIO */
         }
     }
@@ -959,7 +959,7 @@ void* output_thread(void* param) {
                 for (int j = 0; j < dev->channel_count; j++) {
                     channel_t* channel = devices[i].channels + j;
                     process_outputs(channel, new_freq);
-                    memcpy(channel->waveout, channel->waveout + WAVE_BATCH, AGC_EXTRA * 4);
+                    memcpy(channel->waveout, channel->waveout + channel->wave_batch, AGC_EXTRA * 4);
                 }
                 dev->waveavail = 0;
             }
@@ -982,7 +982,7 @@ void* output_thread(void* param) {
         for (int j = 0; j < dev->channel_count; j++) {
             channel_t* channel = devices[i].channels + j;
             process_outputs(channel, -1);
-            memcpy(channel->waveout, channel->waveout + WAVE_BATCH, AGC_EXTRA * 4);
+            memcpy(channel->waveout, channel->waveout + channel->wave_batch, AGC_EXTRA * 4);
         }
         dev->waveavail = 0;
     }
@@ -1035,7 +1035,7 @@ void* output_check_thread(void*) {
                             }
                         } else if (dev->input->state == INPUT_RUNNING) {
                             if (pdata->context == NULL) {
-                                pulse_setup(pdata, dev->channels[j].mode);
+                                pulse_setup(pdata, dev->channels[j].mode, dev->channels[j].wave_rate);
                             }
                         }
 #endif /* WITH_PULSEAUDIO */
@@ -1059,7 +1059,7 @@ void* output_check_thread(void*) {
                 } else if (mixers[i].channel.outputs[k].type == O_PULSE) {
                     pulse_data* pdata = (pulse_data*)(mixers[i].channel.outputs[k].data);
                     if (pdata->context == NULL) {
-                        pulse_setup(pdata, mixers[i].channel.mode);
+                        pulse_setup(pdata, mixers[i].channel.mode, mixers[i].channel.wave_rate);
                     }
 #endif /* WITH_PULSEAUDIO */
                 }

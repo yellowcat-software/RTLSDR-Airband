@@ -46,6 +46,7 @@ struct input_t {
     float fullscale;
     int bytes_per_sample;
     int sample_rate;
+    int wave_rate;  // mirror of dev->wave_rate, populated by config so file/sdr readers can size their batches
     int centerfreq;
     int (*parse_config)(input_t* const input, libconfig::Setting& cfg);
     int (*init)(input_t* const input);

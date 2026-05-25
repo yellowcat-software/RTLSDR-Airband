@@ -20,6 +20,7 @@ def write_config(
     mixers: list[dict] | None = None,
     mp3_tmp_dir: Path | None = None,
     stats_filepath: Path | None = None,
+    wave_rate: int | None = None,
 ) -> None:
     """
     Write a minimal libconfig++-format .conf file for rtl_airband.
@@ -84,6 +85,8 @@ def write_config(
     lines.append('  type = "file";')
     lines.append(f'  filepath = "{iq_filepath}";')
     lines.append(f"  sample_rate = {sample_rate};")
+    if wave_rate is not None:
+        lines.append(f"  wave_rate = {wave_rate};")
     lines.append(f"  centerfreq = {centerfreq_hz};")
     lines.append(f"  speedup_factor = {speedup_factor:.6f};")
     if mode == "scan":
