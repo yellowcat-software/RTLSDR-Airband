@@ -659,6 +659,24 @@ static int parse_channels(libconfig::Setting& chans, device_t* dev, int i) {
                 }
             }
         }
+        if (chans[j].exists("rnnoise")) {
+            libconfig::Setting& settings = chans[j]["rnnoise"];
+            const bool enabled = settings.exists("enabled") ? (bool)settings["enabled"] : false;
+            if (enabled) {
+#ifdef WITH_RNNOISE
+                const float wet = settings.exists("wet") ? (float)settings["wet"] : 1.0f;
+                if (wet < 0.0f || wet > 1.0f) {
+                    cerr << "Configuration error: devices.[" << i << "] channels.[" << j << "]: rnnoise wet (" << wet << ") must be in [0.0, 1.0]\n";
+                    error();
+                }
+                for (int f = 0; f < channel->freq_count; f++) {
+                    channel->freqlist[f].rnnoise = RnnoiseDenoise(WAVE_RATE, wet);
+                }
+#else
+                cerr << "Warning: devices.[" << i << "] channels.[" << j << "]: rnnoise.enabled = true but this binary was built without -DRNNOISE=ON; denoise will be a no-op\n";
+#endif /* WITH_RNNOISE */
+            }
+        }
         if (chans[j].exists("ampfactor")) {
             if (libconfig::Setting::TypeList == chans[j]["ampfactor"].getType()) {
                 for (int f = 0; f < channel->freq_count; f++) {

@@ -127,6 +127,9 @@ set(WITH_PULSEAUDIO FALSE)
 option(PROFILING "Enable profiling with gperftools")
 set(WITH_PROFILING FALSE)
 
+option(RNNOISE "Enable RNNoise (Mozilla/JM Valin) audio denoise" OFF)
+set(WITH_RNNOISE FALSE)
+
 if(RTLSDR)
 	find_package(RTLSDR)
 	if(RTLSDR_FOUND)
@@ -183,6 +186,15 @@ if(PROFILING)
 		list(APPEND link_dirs ${PROFILING_LIBRARY_DIRS})
 		set(WITH_PROFILING TRUE)
 	endif()
+endif()
+
+if(RNNOISE)
+	pkg_check_modules(RNNOISE_PKG REQUIRED rnnoise)
+	pkg_check_modules(SAMPLERATE REQUIRED samplerate)
+	list(APPEND rtl_airband_extra_libs ${RNNOISE_PKG_LIBRARIES} ${SAMPLERATE_LIBRARIES})
+	list(APPEND rtl_airband_include_dirs ${RNNOISE_PKG_INCLUDE_DIRS} ${SAMPLERATE_INCLUDE_DIRS})
+	list(APPEND link_dirs ${RNNOISE_PKG_LIBRARY_DIRS} ${SAMPLERATE_LIBRARY_DIRS})
+	set(WITH_RNNOISE TRUE)
 endif()
 
 
@@ -255,6 +267,7 @@ message(STATUS "  - Broadcom VideoCore GPU:\t${WITH_BCM_VC}")
 message(STATUS "  - NFM support:\t\t${NFM}")
 message(STATUS "  - PulseAudio:\t\trequested: ${PULSEAUDIO}, enabled: ${WITH_PULSEAUDIO}")
 message(STATUS "  - Profiling:\t\trequested: ${PROFILING}, enabled: ${WITH_PROFILING}")
+message(STATUS "  - RNNoise:\t\trequested: ${RNNOISE}, enabled: ${WITH_RNNOISE}")
 message(STATUS "  - Icecast TLS support:\t${LIBSHOUT_HAS_TLS}")
 
 if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/config.h)
@@ -290,6 +303,7 @@ add_library (rtl_airband_base OBJECT
 	filters.cpp
 	demod_coherent.cpp
 	denoise_wiener.cpp
+	denoise_rnnoise.cpp
 	helper_functions.cpp
 	${CMAKE_CURRENT_BINARY_DIR}/version.cpp
 	${rtl_airband_extra_sources}
@@ -360,6 +374,7 @@ if(BUILD_UNITTESTS)
 		ctcss.cpp
 		demod_coherent.cpp
 		denoise_wiener.cpp
+		denoise_rnnoise.cpp
 		generate_signal.cpp
 		helper_functions.cpp
 	)

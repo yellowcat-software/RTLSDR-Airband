@@ -149,6 +149,14 @@ def write_config(
                 lines.append(f"        min_gain_db = {wn['min_gain_db']:.2f};")
             lines.append("      };")
 
+        if ch.get("rnnoise") is not None:
+            rn = ch["rnnoise"]
+            lines.append("      rnnoise = {")
+            lines.append(f"        enabled = {str(rn.get('enabled', True)).lower()};")
+            if "wet" in rn:
+                lines.append(f"        wet = {rn['wet']:.3f};")
+            lines.append("      };")
+
         # Build output entries: file outputs use directory+template+append,
         # mixer outputs use name+balance.
         output_entries: list[dict] = []

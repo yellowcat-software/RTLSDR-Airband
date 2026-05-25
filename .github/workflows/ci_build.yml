@@ -31,14 +31,34 @@ jobs:
     - name: Build and Unit Tests
       run: VERBOSE=1 scripts/run_unit_tests
 
+    # RNNoise build smoke-test: Linux only (librnnoise-dev / libsamplerate0-dev
+    # come from apt; macOS brew doesn't ship rnnoise in core formulae). The
+    # build is opt-in via -DRNNOISE=ON so the default matrix above never touches
+    # this code path — this step guards against bitrot.
+    - name: Build with RNNoise (Linux only)
+      if: runner.os == 'Linux'
+      run: |
+        cmake -B builds/Release_rnnoise \
+          -DCMAKE_BUILD_TYPE=Release \
+          -DRNNOISE=ON \
+          -DBUILD_UNITTESTS=TRUE \
+          -DPLATFORM=native
+        cmake --build builds/Release_rnnoise -j
+        ./builds/Release_rnnoise/src/unittests
+
     - name: Install uv
       uses: astral-sh/setup-uv@v8.1.0
 
     - name: Run system tests
       run: |
+        EXTRA_ARGS=()
+        if [ -f builds/Release_rnnoise/src/rtl_airband ]; then
+          EXTRA_ARGS+=(--rnnoise-binary builds/Release_rnnoise/src/rtl_airband)
+        fi
         uv run --no-group dev pytest system_tests/tests/ \
           --binary builds/Release/src/rtl_airband \
           --nfm-binary builds/Release_nfm/src/rtl_airband \
+          "${EXTRA_ARGS[@]}" \
           --mode thorough \
           --clean \
           -v

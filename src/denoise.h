@@ -28,6 +28,10 @@
 #include <fftw3.h>
 #include <vector>
 
+#include "config.h"  // WITH_RNNOISE — must be visible identically in every TU
+                     // that sees this header, since RnnoiseDenoise's member
+                     // layout is gated on it.
+
 class WienerDenoise {
    public:
     WienerDenoise(void);
@@ -87,14 +91,40 @@ class WienerDenoise {
     int min_filled_;
 };
 
-// RnnoiseDenoise is a placeholder in this commit; commit 3 (AUD-8) replaces
-// the stub with a real implementation guarded by WITH_RNNOISE. Defining the
-// class shape here keeps `freq_t`'s ABI stable across the two commits.
+// Forward declares so the header doesn't drag in <rnnoise.h>/<samplerate.h>
+// for every translation unit that includes us. The real types live in
+// denoise_rnnoise.cpp.
+struct DenoiseState;
+typedef struct SRC_STATE_tag SRC_STATE;
+
 class RnnoiseDenoise {
    public:
-    RnnoiseDenoise(void) {}
-    void apply(float*, int) {}
-    bool enabled(void) const { return false; }
+    RnnoiseDenoise(void);
+#ifdef WITH_RNNOISE
+    RnnoiseDenoise(int sample_rate, float wet_mix);
+#endif
+    ~RnnoiseDenoise(void);
+
+    RnnoiseDenoise(const RnnoiseDenoise&) = delete;
+    RnnoiseDenoise& operator=(const RnnoiseDenoise&) = delete;
+    RnnoiseDenoise(RnnoiseDenoise&& other) noexcept;
+    RnnoiseDenoise& operator=(RnnoiseDenoise&& other) noexcept;
+
+    void apply(float* samples, int n);
+    bool enabled(void) const { return enabled_; }
+
+   private:
+    bool enabled_;
+#ifdef WITH_RNNOISE
+    DenoiseState* st_;
+    SRC_STATE* up_;
+    SRC_STATE* down_;
+    int sample_rate_;
+    double up_ratio_;
+    float wet_;
+    std::vector<float> in_48k_;
+    std::vector<float> out_wave_;
+#endif
 };
 
 #endif /* _DENOISE_H */

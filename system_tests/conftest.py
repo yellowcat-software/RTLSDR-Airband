@@ -50,6 +50,12 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         help="Path to NFM rtl_airband binary",
     )
     parser.addoption(
+        "--rnnoise-binary",
+        default=None,
+        help="Path to rtl_airband binary built with -DRNNOISE=ON; tests "
+        "covering the RNNoise denoise path are skipped if unset.",
+    )
+    parser.addoption(
         "--mode",
         choices=["fast", "thorough"],
         default="thorough",
@@ -154,6 +160,18 @@ def pytest_configure(config: pytest.Config) -> None:
             )
 
         config._rtlsdr_am_binaries = bins
+
+    rnnoise_val = None
+    try:
+        rnnoise_val = config.getoption("--rnnoise-binary")
+    except ValueError:
+        pass
+    if rnnoise_val is not None:
+        config._rtlsdr_rnnoise_binaries = [
+            BinaryUnderTest(path=Path(rnnoise_val), wave_rate=8000, label="rnnoise")
+        ]
+    else:
+        config._rtlsdr_rnnoise_binaries = []
 
     # Reject --mode thorough with -n. Thorough mode caps output overruns at 1
     # (first-batch warm-up only); parallel pytest-xdist workers contending for
