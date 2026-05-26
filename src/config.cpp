@@ -37,9 +37,28 @@ static int parse_outputs(libconfig::Setting& outs, channel_t* channel, int i, in
         channel->outputs[oo].has_mp3_output = false;
         channel->outputs[oo].lame = NULL;
         channel->outputs[oo].lamebuf = NULL;
+        channel->outputs[oo].mp3_rate = MP3_RATE;
 
         if (outs[o].exists("disable") && (bool)outs[o]["disable"] == true) {
             continue;
+        }
+
+        // Per-output MP3 sample_rate. Applied to file/icecast outputs (LAME
+        // encodes wave_rate → sample_rate). udp_stream / pulse / rawfile carry
+        // raw floats at wave_rate; setting sample_rate on those is parsed but
+        // not currently used for resampling.
+        if (outs[o].exists("sample_rate")) {
+            int rate = parse_anynum2int(outs[o]["sample_rate"]);
+            if (!is_lame_supported_rate(rate)) {
+                if (parsing_mixers) {
+                    cerr << "Configuration error: mixers.[" << i << "] outputs.[" << o << "]: ";
+                } else {
+                    cerr << "Configuration error: devices.[" << i << "] channels.[" << j << "] outputs.[" << o << "]: ";
+                }
+                cerr << "sample_rate (" << rate << ") must be one of LAME-supported rates: 8000, 11025, 12000, 16000, 22050, 24000, 32000, 44100, 48000\n";
+                error();
+            }
+            channel->outputs[oo].mp3_rate = rate;
         }
         if (!strncmp(outs[o]["type"], "icecast", 7)) {
             channel->outputs[oo].data = XCALLOC(1, sizeof(struct icecast_data));
@@ -284,6 +303,18 @@ static struct freq_t* mk_freqlist(int n) {
         fl[i].modulation = MOD_AM;
     }
     return fl;
+}
+
+// LAME-supported sample rates. Used to validate both per-device wave_rate
+// and per-output sample_rate.
+static bool is_lame_supported_rate(int rate) {
+    static const int kAllowedRates[] = {8000, 11025, 12000, 16000, 22050, 24000, 32000, 44100, 48000};
+    for (size_t k = 0; k < sizeof(kAllowedRates) / sizeof(kAllowedRates[0]); ++k) {
+        if (rate == kAllowedRates[k]) {
+            return true;
+        }
+    }
+    return false;
 }
 
 static void warn_if_freq_not_in_range(int devidx, int chanidx, int freq, int centerfreq, int sample_rate) {
@@ -814,15 +845,7 @@ int parse_devices(libconfig::Setting& devs) {
         dev->wave_rate = WAVE_RATE;
         if (devs[i].exists("wave_rate")) {
             int rate = parse_anynum2int(devs[i]["wave_rate"]);
-            static const int kAllowedRates[] = {8000, 11025, 12000, 16000, 22050, 24000, 32000, 44100, 48000};
-            bool ok = false;
-            for (size_t k = 0; k < sizeof(kAllowedRates) / sizeof(kAllowedRates[0]); ++k) {
-                if (rate == kAllowedRates[k]) {
-                    ok = true;
-                    break;
-                }
-            }
-            if (!ok) {
+            if (!is_lame_supported_rate(rate)) {
                 cerr << "Configuration error: devices.[" << i << "]: wave_rate (" << rate << ") must be one of LAME-supported rates: 8000, 11025, 12000, 16000, 22050, 24000, 32000, 44100, 48000\n";
                 error();
             }

@@ -164,13 +164,14 @@ def write_config(
         # mixer outputs use name+balance.
         output_entries: list[dict] = []
         if mp3_tmp_dir is not None:
-            output_entries.append(
-                {
-                    "type": "file",
-                    "directory": str(mp3_tmp_dir),
-                    "template": ch["output_filename_template"],
-                }
-            )
+            entry: dict = {
+                "type": "file",
+                "directory": str(mp3_tmp_dir),
+                "template": ch["output_filename_template"],
+            }
+            if ch.get("output_sample_rate") is not None:
+                entry["sample_rate"] = int(ch["output_sample_rate"])
+            output_entries.append(entry)
         if ch.get("mixer_output") is not None:
             output_entries.append(
                 {
@@ -192,6 +193,8 @@ def write_config(
                 lines.append(f'          directory = "{entry["directory"]}";')
                 lines.append(f'          filename_template = "{entry["template"]}";')
                 lines.append("          append = false;")
+                if "sample_rate" in entry:
+                    lines.append(f"          sample_rate = {entry['sample_rate']};")
             lines.append("        }" + ("" if is_last_out else ","))
         lines.append("      );")
 

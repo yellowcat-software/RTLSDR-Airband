@@ -270,11 +270,11 @@ void init_demod(demod_params_t* params, Signal* signal, int device_start, int de
 
 bool init_output(channel_t* channel, output_t* output) {
     if (output->has_mp3_output) {
-        output->lame = airlame_init(channel->mode, channel->highpass, channel->lowpass, channel->wave_rate);
+        output->lame = airlame_init(channel->mode, channel->highpass, channel->lowpass, channel->wave_rate, output->mp3_rate);
         output->lamebuf = (unsigned char*)malloc(sizeof(unsigned char) * LAMEBUF_SIZE);
     }
     if (output->type == O_ICECAST) {
-        shout_setup((icecast_data*)(output->data), channel->mode);
+        shout_setup((icecast_data*)(output->data), channel->mode, output->mp3_rate);
     } else if (output->type == O_UDP_STREAM) {
         udp_stream_data* sdata = (udp_stream_data*)(output->data);
         if (!udp_stream_init(sdata, channel->mode, (size_t)channel->wave_batch * sizeof(float), channel->wave_rate)) {

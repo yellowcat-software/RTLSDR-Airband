@@ -204,6 +204,12 @@ struct output_t {
     // is complete
     bool has_mp3_output;
 
+    // MP3 encode/output sample rate. Defaults to compile-time MP3_RATE when the
+    // user doesn't set `sample_rate` on the output; for icecast/file LAME does
+    // the wave_rate→mp3_rate conversion. For udp_stream / pulse this matches
+    // the device's wave_rate (no resampling).
+    int mp3_rate;
+
     // lame encoder and buffer for mp3 output. initialized after config parsing
     // if `uses_mp3_output` is true
     lame_t lame;
@@ -373,8 +379,8 @@ struct output_params_t {
 extern char const* RTL_AIRBAND_VERSION;
 
 // output.cpp
-lame_t airlame_init(mix_modes mixmode, int highpass, int lowpass, int wave_rate);
-void shout_setup(icecast_data* icecast, mix_modes mixmode);
+lame_t airlame_init(mix_modes mixmode, int highpass, int lowpass, int wave_rate, int mp3_rate);
+void shout_setup(icecast_data* icecast, mix_modes mixmode, int mp3_rate);
 void disable_device_outputs(device_t* dev);
 void disable_channel_outputs(channel_t* channel);
 void* output_check_thread(void* params);

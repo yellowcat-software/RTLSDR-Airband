@@ -52,7 +52,7 @@
 #include "input-common.h"
 #include "rtl_airband.h"
 
-void shout_setup(icecast_data* icecast, mix_modes mixmode) {
+void shout_setup(icecast_data* icecast, mix_modes mixmode, int mp3_rate) {
     int ret;
     shout_t* shouttemp = shout_new();
     if (shouttemp == NULL) {
@@ -111,7 +111,7 @@ void shout_setup(icecast_data* icecast, mix_modes mixmode) {
         return;
     }
     char samplerates[20];
-    sprintf(samplerates, "%d", MP3_RATE);
+    sprintf(samplerates, "%d", mp3_rate > 0 ? mp3_rate : MP3_RATE);
     shout_set_audio_info(shouttemp, SHOUT_AI_SAMPLERATE, samplerates);
     shout_set_audio_info(shouttemp, SHOUT_AI_CHANNELS, (mixmode == MM_STEREO ? "2" : "1"));
 
@@ -144,7 +144,7 @@ void shout_setup(icecast_data* icecast, mix_modes mixmode) {
     }
 }
 
-lame_t airlame_init(mix_modes mixmode, int highpass, int lowpass, int wave_rate) {
+lame_t airlame_init(mix_modes mixmode, int highpass, int lowpass, int wave_rate, int mp3_rate) {
     lame_t lame = lame_init();
     if (!lame) {
         log(LOG_WARNING, "lame_init failed\n");
@@ -157,7 +157,7 @@ lame_t airlame_init(mix_modes mixmode, int highpass, int lowpass, int wave_rate)
     lame_set_quality(lame, 7);
     lame_set_lowpassfreq(lame, lowpass);
     lame_set_highpassfreq(lame, highpass);
-    lame_set_out_samplerate(lame, MP3_RATE);
+    lame_set_out_samplerate(lame, mp3_rate > 0 ? mp3_rate : MP3_RATE);
     if (mixmode == MM_STEREO) {
         lame_set_num_channels(lame, 2);
         lame_set_mode(lame, JOINT_STEREO);
@@ -175,13 +175,13 @@ class LameTone {
     int _bytes;
 
    public:
-    LameTone(mix_modes mixmode, int wave_rate, int msec, unsigned int hz = 0) : _data(NULL), _bytes(0) {
+    LameTone(mix_modes mixmode, int wave_rate, int mp3_rate, int msec, unsigned int hz = 0) : _data(NULL), _bytes(0) {
         _data = (unsigned char*)XCALLOC(1, LAMEBUF_SIZE);
 
         int samples = (msec * wave_rate) / 1000;
         float* buf = (float*)XCALLOC(samples, sizeof(float));
 
-        debug_print("LameTone with mixmode=%s rate=%d msec=%d hz=%u\n", mixmode == MM_STEREO ? "MM_STEREO" : "MM_MONO", wave_rate, msec, hz);
+        debug_print("LameTone with mixmode=%s wave_rate=%d mp3_rate=%d msec=%d hz=%u\n", mixmode == MM_STEREO ? "MM_STEREO" : "MM_MONO", wave_rate, mp3_rate, msec, hz);
         if (hz > 0) {
             const float period = 1.0 / (float)hz;
             const float sample_time = 1.0 / (float)wave_rate;
@@ -191,7 +191,7 @@ class LameTone {
             }
         } else
             memset(buf, 0, samples * sizeof(float));
-        lame_t lame = airlame_init(mixmode, 0, 0, wave_rate);
+        lame_t lame = airlame_init(mixmode, 0, 0, wave_rate, mp3_rate);
         if (lame) {
             _bytes = lame_encode_buffer_ieee_float(lame, buf, (mixmode == MM_STEREO ? buf : NULL), samples, _data, LAMEBUF_SIZE);
             if (_bytes > 0) {
@@ -247,7 +247,7 @@ int rename_if_exists(char const* oldpath, char const* newpath) {
  * If appending to an audio file, insert discontinuity indictor tones
  * as well as the appropriate amount of silence when in continuous mode.
  */
-static int open_file(file_data* fdata, mix_modes mixmode, int is_audio, int wave_rate) {
+static int open_file(file_data* fdata, mix_modes mixmode, int is_audio, int wave_rate, int mp3_rate) {
     int rename_result = rename_if_exists(fdata->file_path.c_str(), fdata->file_path_tmp.c_str());
     if (fdata->append) {
         // Open without O_APPEND so fseek+fwrite works correctly (e.g. for the lametag).
@@ -283,10 +283,11 @@ static int open_file(file_data* fdata, mix_modes mixmode, int is_audio, int wave
     }
 
     if (is_audio) {
-        // fill missing space with marker tones
-        LameTone lt_a(mixmode, wave_rate, 120, 2222);
-        LameTone lt_b(mixmode, wave_rate, 120, 1111);
-        LameTone lt_c(mixmode, wave_rate, 120, 555);
+        // fill missing space with marker tones, encoded at the file's mp3_rate
+        // so the appended frames match the existing stream's rate.
+        LameTone lt_a(mixmode, wave_rate, mp3_rate, 120, 2222);
+        LameTone lt_b(mixmode, wave_rate, mp3_rate, 120, 1111);
+        LameTone lt_c(mixmode, wave_rate, mp3_rate, 120, 555);
 
         int r = lt_a.write(fdata->f);
         if (r == 0)
@@ -303,7 +304,7 @@ static int open_file(file_data* fdata, mix_modes mixmode, int is_audio, int wave
                     log(LOG_WARNING, "Too big time difference: %llu sec, limiting to one hour\n", (unsigned long long)delta);
                     delta = 3600;
                 }
-                LameTone lt_silence(mixmode, wave_rate, 1000);
+                LameTone lt_silence(mixmode, wave_rate, mp3_rate, 1000);
                 for (; (r == 0 && delta > 1); --delta)
                     r = lt_silence.write(fdata->f);
             }
@@ -468,7 +469,7 @@ static bool output_file_ready(channel_t* channel, output_t* output) {
     fdata->open_time = fdata->last_write_time = current_time;
 
     const int is_audio = output->type == O_RAWFILE ? 0 : 1;
-    if (open_file(fdata, channel->mode, is_audio, channel->wave_rate) < 0) {
+    if (open_file(fdata, channel->mode, is_audio, channel->wave_rate, output->mp3_rate) < 0) {
         log(LOG_WARNING, "Cannot open output file %s (%s)\n", fdata->file_path_tmp.c_str(), strerror(errno));
         return false;
     }
@@ -1017,7 +1018,7 @@ void* output_check_thread(void*) {
                         } else if (dev->input->state == INPUT_RUNNING) {
                             if (icecast->shout == NULL) {
                                 log(LOG_NOTICE, "Trying to reconnect to %s:%d/%s...\n", icecast->hostname, icecast->port, icecast->mountpoint);
-                                shout_setup(icecast, dev->channels[j].mode);
+                                shout_setup(icecast, dev->channels[j].mode, dev->channels[j].outputs[k].mp3_rate);
                             }
                         }
                     } else if (dev->channels[j].outputs[k].type == O_UDP_STREAM) {
@@ -1053,7 +1054,7 @@ void* output_check_thread(void*) {
                     icecast_data* icecast = (icecast_data*)(mixers[i].channel.outputs[k].data);
                     if (icecast->shout == NULL) {
                         log(LOG_NOTICE, "Trying to reconnect to %s:%d/%s...\n", icecast->hostname, icecast->port, icecast->mountpoint);
-                        shout_setup(icecast, mixers[i].channel.mode);
+                        shout_setup(icecast, mixers[i].channel.mode, mixers[i].channel.outputs[k].mp3_rate);
                     }
 #ifdef WITH_PULSEAUDIO
                 } else if (mixers[i].channel.outputs[k].type == O_PULSE) {
