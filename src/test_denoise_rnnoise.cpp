@@ -59,9 +59,15 @@ TEST_F(RnnoiseDenoiseTest, parameterized_constructor_enables) {
 
 TEST_F(RnnoiseDenoiseTest, invalid_parameters_disable) {
     EXPECT_FALSE(RnnoiseDenoise(0, 1.0f).enabled());
-    EXPECT_FALSE(RnnoiseDenoise(48000, 1.0f).enabled()) << "input >= 48 kHz makes no sense for the upsample-to-48kHz pipeline";
+    EXPECT_FALSE(RnnoiseDenoise(48001, 1.0f).enabled()) << "input above 48 kHz can't be handled (RNNoise is fixed at 48 kHz)";
     EXPECT_FALSE(RnnoiseDenoise(WAVE_RATE, -0.1f).enabled());
     EXPECT_FALSE(RnnoiseDenoise(WAVE_RATE, 1.1f).enabled());
+}
+
+TEST_F(RnnoiseDenoiseTest, passthrough_at_48khz_skips_resampler) {
+    // At exactly 48 kHz the wrapper feeds RNNoise directly — no libsamplerate.
+    RnnoiseDenoise dn(48000, 1.0f);
+    EXPECT_TRUE(dn.enabled());
 }
 
 TEST_F(RnnoiseDenoiseTest, silence_in_produces_silence_out) {

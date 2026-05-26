@@ -51,31 +51,41 @@ constexpr float kPcm16Scale = 32768.0f;
 RnnoiseDenoise::RnnoiseDenoise(void) : enabled_(false), st_(nullptr), up_(nullptr), down_(nullptr), sample_rate_(0), up_ratio_(0.0), wet_(0.0f) {}
 
 RnnoiseDenoise::RnnoiseDenoise(int sample_rate, float wet_mix) : enabled_(true), st_(nullptr), up_(nullptr), down_(nullptr), sample_rate_(sample_rate), up_ratio_((double)kRnnoiseRateHz / (double)sample_rate), wet_(wet_mix) {
-    if (sample_rate <= 0 || sample_rate >= kRnnoiseRateHz || wet_mix < 0.0f || wet_mix > 1.0f) {
+    if (sample_rate <= 0 || sample_rate > kRnnoiseRateHz || wet_mix < 0.0f || wet_mix > 1.0f) {
         debug_print("Invalid rnnoise parameters (sample_rate=%d wet=%f), disabling\n", sample_rate, wet_mix);
         enabled_ = false;
         return;
     }
 
     st_ = rnnoise_create(NULL);
-    int err = 0;
-    up_ = src_new(SRC_SINC_FASTEST, 1, &err);
-    if (!st_ || !up_) {
-        debug_print("rnnoise/samplerate up state alloc failed (err=%d), disabling\n", err);
-        enabled_ = false;
-        return;
-    }
-    err = 0;
-    down_ = src_new(SRC_SINC_FASTEST, 1, &err);
-    if (!down_) {
-        debug_print("samplerate down state alloc failed (err=%d), disabling\n", err);
+    if (!st_) {
+        debug_print("rnnoise_create failed, disabling\n");
         enabled_ = false;
         return;
     }
 
+    // Skip the libsamplerate stages entirely when the audio already runs at
+    // RNNoise's native 48 kHz — saves a resample round-trip per frame.
+    if (sample_rate != kRnnoiseRateHz) {
+        int err = 0;
+        up_ = src_new(SRC_SINC_FASTEST, 1, &err);
+        if (!up_) {
+            debug_print("samplerate up state alloc failed (err=%d), disabling\n", err);
+            enabled_ = false;
+            return;
+        }
+        err = 0;
+        down_ = src_new(SRC_SINC_FASTEST, 1, &err);
+        if (!down_) {
+            debug_print("samplerate down state alloc failed (err=%d), disabling\n", err);
+            enabled_ = false;
+            return;
+        }
+    }
+
     in_48k_.reserve((size_t)kRnnoiseFrameSize * 4);
     out_wave_.reserve(2048);
-    debug_print("RnnoiseDenoise: sample_rate=%d up_ratio=%.6f wet=%f\n", sample_rate_, up_ratio_, wet_);
+    debug_print("RnnoiseDenoise: sample_rate=%d up_ratio=%.6f wet=%f passthrough=%d\n", sample_rate_, up_ratio_, wet_, sample_rate == kRnnoiseRateHz);
 }
 
 RnnoiseDenoise::~RnnoiseDenoise(void) {
@@ -140,26 +150,36 @@ void RnnoiseDenoise::apply(float* samples, int n) {
         return;
     }
 
-    // Step 1: upsample input to 48 kHz, append to in_48k_.
-    const size_t up_room = (size_t)((double)n * up_ratio_) + 64;
-    const size_t prev_in = in_48k_.size();
-    in_48k_.resize(prev_in + up_room);
-    SRC_DATA up_data;
-    up_data.data_in = samples;
-    up_data.input_frames = n;
-    up_data.data_out = in_48k_.data() + prev_in;
-    up_data.output_frames = (long)up_room;
-    up_data.end_of_input = 0;
-    up_data.src_ratio = up_ratio_;
-    up_data.input_frames_used = 0;
-    up_data.output_frames_gen = 0;
-    src_process(up_, &up_data);
-    in_48k_.resize(prev_in + (size_t)up_data.output_frames_gen);
+    const bool passthrough = (sample_rate_ == kRnnoiseRateHz);
 
-    // Step 2: drain 480-sample frames through rnnoise. Emit cleaned 48 kHz
-    // samples into a local staging buffer that we then downsample.
+    // Step 1: bring input up to 48 kHz, append to in_48k_.
+    if (passthrough) {
+        // Already at 48 kHz — copy directly into the framing buffer.
+        in_48k_.insert(in_48k_.end(), samples, samples + n);
+    } else {
+        const size_t up_room = (size_t)((double)n * up_ratio_) + 64;
+        const size_t prev_in = in_48k_.size();
+        in_48k_.resize(prev_in + up_room);
+        SRC_DATA up_data;
+        up_data.data_in = samples;
+        up_data.input_frames = n;
+        up_data.data_out = in_48k_.data() + prev_in;
+        up_data.output_frames = (long)up_room;
+        up_data.end_of_input = 0;
+        up_data.src_ratio = up_ratio_;
+        up_data.input_frames_used = 0;
+        up_data.output_frames_gen = 0;
+        src_process(up_, &up_data);
+        in_48k_.resize(prev_in + (size_t)up_data.output_frames_gen);
+    }
+
+    // Step 2: drain 480-sample frames through rnnoise. In passthrough mode
+    // the cleaned 48 kHz samples go straight to out_wave_; otherwise stage
+    // them for the downsample pass below.
     std::vector<float> staged_48k;
-    staged_48k.reserve(in_48k_.size());
+    if (!passthrough) {
+        staged_48k.reserve(in_48k_.size());
+    }
     size_t consumed = 0;
     while (in_48k_.size() - consumed >= (size_t)kRnnoiseFrameSize) {
         float in_frame[kRnnoiseFrameSize];
@@ -171,7 +191,12 @@ void RnnoiseDenoise::apply(float* samples, int n) {
         for (int i = 0; i < kRnnoiseFrameSize; ++i) {
             const float clean = out_frame[i] / kPcm16Scale;
             const float dry = in_48k_[consumed + (size_t)i];
-            staged_48k.push_back(wet_ * clean + (1.0f - wet_) * dry);
+            const float mixed = wet_ * clean + (1.0f - wet_) * dry;
+            if (passthrough) {
+                out_wave_.push_back(mixed);
+            } else {
+                staged_48k.push_back(mixed);
+            }
         }
         consumed += (size_t)kRnnoiseFrameSize;
     }
@@ -180,7 +205,8 @@ void RnnoiseDenoise::apply(float* samples, int n) {
     }
 
     // Step 3: downsample staged 48 kHz back to WAVE_RATE, append to out_wave_.
-    if (!staged_48k.empty()) {
+    // Skipped entirely in passthrough mode (out_wave_ was filled above).
+    if (!passthrough && !staged_48k.empty()) {
         const size_t down_room = (size_t)((double)staged_48k.size() / up_ratio_) + 64;
         const size_t prev_out = out_wave_.size();
         out_wave_.resize(prev_out + down_room);
