@@ -31,6 +31,12 @@
 
 using namespace std;
 
+// Forward declarations: parse_outputs (below) uses these helpers, which are
+// defined further down. Hoisting the prototypes here avoids reordering the
+// rest of the file.
+static int parse_anynum2int(libconfig::Setting& f);
+static bool is_lame_supported_rate(int rate);
+
 static int parse_outputs(libconfig::Setting& outs, channel_t* channel, int i, int j, bool parsing_mixers) {
     int oo = 0;
     for (int o = 0; o < channel->output_count; o++) {
