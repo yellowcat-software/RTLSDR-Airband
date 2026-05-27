@@ -477,6 +477,30 @@ static bool output_file_ready(channel_t* channel, output_t* output) {
     return true;
 }
 
+// If this output has a compressor configured, copy channel->waveout (and the
+// right channel in stereo mode) into the output's scratch buffer and run the
+// compressor in-place. Returns pointers the caller should use for L/R samples
+// — either the scratch (when compressor is active) or channel->waveout/_r.
+static void prepare_audio_buffers(output_t* output, channel_t* channel, const float** out_l, const float** out_r) {
+    if (output->compressor.enabled() && output->compressor_scratch != NULL) {
+        const int n = channel->wave_batch;
+        memcpy(output->compressor_scratch, channel->waveout, (size_t)n * sizeof(float));
+        if (channel->mode == MM_STEREO && output->compressor_scratch_r != NULL) {
+            memcpy(output->compressor_scratch_r, channel->waveout_r, (size_t)n * sizeof(float));
+            output->compressor.apply_stereo(output->compressor_scratch, output->compressor_scratch_r, n);
+            *out_l = output->compressor_scratch;
+            *out_r = output->compressor_scratch_r;
+        } else {
+            output->compressor.apply(output->compressor_scratch, n);
+            *out_l = output->compressor_scratch;
+            *out_r = NULL;
+        }
+    } else {
+        *out_l = channel->waveout;
+        *out_r = (channel->mode == MM_STEREO) ? channel->waveout_r : NULL;
+    }
+}
+
 // Create all the output for a particular channel.
 void process_outputs(channel_t* channel, int cur_scan_freq) {
     for (int k = 0; k < channel->output_count; k++) {
@@ -490,7 +514,10 @@ void process_outputs(channel_t* channel, int cur_scan_freq) {
             // encode and send mp3 to shoutcast output
             const auto& lame = channel->outputs[k].lame;
             const auto& lamebuf = channel->outputs[k].lamebuf;
-            int mp3_bytes = lame_encode_buffer_ieee_float(lame, channel->waveout, (channel->mode == MM_STEREO ? channel->waveout_r : NULL), channel->wave_batch, lamebuf, LAMEBUF_SIZE);
+            const float* enc_l = NULL;
+            const float* enc_r = NULL;
+            prepare_audio_buffers(&channel->outputs[k], channel, &enc_l, &enc_r);
+            int mp3_bytes = lame_encode_buffer_ieee_float(lame, enc_l, enc_r, channel->wave_batch, lamebuf, LAMEBUF_SIZE);
             if (mp3_bytes < 0) {
                 log(LOG_WARNING, "lame_encode_buffer_ieee_float: %d\n", mp3_bytes);
             }
@@ -546,7 +573,10 @@ void process_outputs(channel_t* channel, int cur_scan_freq) {
             const auto& lamebuf = channel->outputs[k].lamebuf;
             int mp3_bytes = 0;
             if (channel->outputs[k].type == O_FILE) {
-                mp3_bytes = lame_encode_buffer_ieee_float(lame, channel->waveout, (channel->mode == MM_STEREO ? channel->waveout_r : NULL), channel->wave_batch, lamebuf, LAMEBUF_SIZE);
+                const float* enc_l = NULL;
+                const float* enc_r = NULL;
+                prepare_audio_buffers(&channel->outputs[k], channel, &enc_l, &enc_r);
+                mp3_bytes = lame_encode_buffer_ieee_float(lame, enc_l, enc_r, channel->wave_batch, lamebuf, LAMEBUF_SIZE);
                 if (mp3_bytes < 0) {
                     log(LOG_WARNING, "lame_encode_buffer_ieee_float: %d\n", mp3_bytes);
                 }
@@ -576,7 +606,10 @@ void process_outputs(channel_t* channel, int cur_scan_freq) {
             gettimeofday(&fdata->last_write_time, NULL);
         } else if (channel->outputs[k].type == O_MIXER) {
             mixer_data* mdata = (mixer_data*)(channel->outputs[k].data);
-            mixer_put_samples(mdata->mixer, mdata->input, channel->waveout, channel->axcindicate != NO_SIGNAL, channel->wave_batch);
+            const float* enc_l = NULL;
+            const float* enc_r = NULL;
+            prepare_audio_buffers(&channel->outputs[k], channel, &enc_l, &enc_r);
+            mixer_put_samples(mdata->mixer, mdata->input, enc_l, channel->axcindicate != NO_SIGNAL, channel->wave_batch);
         } else if (channel->outputs[k].type == O_UDP_STREAM) {
             udp_stream_data* sdata = (udp_stream_data*)channel->outputs[k].data;
 
@@ -584,10 +617,13 @@ void process_outputs(channel_t* channel, int cur_scan_freq) {
                 continue;
             }
 
+            const float* enc_l = NULL;
+            const float* enc_r = NULL;
+            prepare_audio_buffers(&channel->outputs[k], channel, &enc_l, &enc_r);
             if (channel->mode == MM_MONO) {
-                udp_stream_write(sdata, channel->waveout, (size_t)channel->wave_batch * sizeof(float));
+                udp_stream_write(sdata, enc_l, (size_t)channel->wave_batch * sizeof(float));
             } else {
-                udp_stream_write(sdata, channel->waveout, channel->waveout_r, (size_t)channel->wave_batch * sizeof(float));
+                udp_stream_write(sdata, enc_l, enc_r, (size_t)channel->wave_batch * sizeof(float));
             }
 
 #ifdef WITH_PULSEAUDIO
@@ -596,7 +632,10 @@ void process_outputs(channel_t* channel, int cur_scan_freq) {
             if (pdata->continuous == false && channel->axcindicate == NO_SIGNAL)
                 continue;
 
-            pulse_write_stream(pdata, channel->mode, channel->waveout, channel->waveout_r, (size_t)channel->wave_batch * sizeof(float));
+            const float* enc_l = NULL;
+            const float* enc_r = NULL;
+            prepare_audio_buffers(&channel->outputs[k], channel, &enc_l, &enc_r);
+            pulse_write_stream(pdata, channel->mode, enc_l, enc_r, (size_t)channel->wave_batch * sizeof(float));
 #endif /* WITH_PULSEAUDIO */
         }
     }

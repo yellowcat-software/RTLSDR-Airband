@@ -273,6 +273,15 @@ bool init_output(channel_t* channel, output_t* output) {
         output->lame = airlame_init(channel->mode, channel->highpass, channel->lowpass, channel->wave_rate, output->mp3_rate);
         output->lamebuf = (unsigned char*)malloc(sizeof(unsigned char) * LAMEBUF_SIZE);
     }
+    if (output->compressor.enabled()) {
+        // Allocate scratch buffer(s) sized for the channel's per-batch sample
+        // count. Stereo path needs a second buffer; mono leaves it NULL.
+        const size_t batch_bytes = (size_t)channel->wave_batch * sizeof(float);
+        output->compressor_scratch = (float*)malloc(batch_bytes);
+        if (channel->mode == MM_STEREO) {
+            output->compressor_scratch_r = (float*)malloc(batch_bytes);
+        }
+    }
     if (output->type == O_ICECAST) {
         shout_setup((icecast_data*)(output->data), channel->mode, output->mp3_rate);
     } else if (output->type == O_UDP_STREAM) {

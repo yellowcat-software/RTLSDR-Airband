@@ -171,6 +171,8 @@ def write_config(
             }
             if ch.get("output_sample_rate") is not None:
                 entry["sample_rate"] = int(ch["output_sample_rate"])
+            if ch.get("compressor") is not None:
+                entry["compressor"] = ch["compressor"]
             output_entries.append(entry)
         if ch.get("mixer_output") is not None:
             output_entries.append(
@@ -195,6 +197,33 @@ def write_config(
                 lines.append("          append = false;")
                 if "sample_rate" in entry:
                     lines.append(f"          sample_rate = {entry['sample_rate']};")
+                if "compressor" in entry:
+                    cmp_cfg = entry["compressor"]
+                    lines.append("          compressor = {")
+                    lines.append(
+                        f"            enabled = {str(cmp_cfg.get('enabled', True)).lower()};"
+                    )
+                    if "threshold_db" in cmp_cfg:
+                        lines.append(
+                            f"            threshold_db = {cmp_cfg['threshold_db']:.2f};"
+                        )
+                    if "ratio" in cmp_cfg:
+                        lines.append(f"            ratio = {cmp_cfg['ratio']:.2f};")
+                    if "attack_ms" in cmp_cfg:
+                        lines.append(
+                            f"            attack_ms = {cmp_cfg['attack_ms']:.2f};"
+                        )
+                    if "release_ms" in cmp_cfg:
+                        lines.append(
+                            f"            release_ms = {cmp_cfg['release_ms']:.2f};"
+                        )
+                    if "knee_db" in cmp_cfg:
+                        lines.append(f"            knee_db = {cmp_cfg['knee_db']:.2f};")
+                    if "makeup_gain_db" in cmp_cfg:
+                        lines.append(
+                            f"            makeup_gain_db = {cmp_cfg['makeup_gain_db']:.2f};"
+                        )
+                    lines.append("          };")
             lines.append("        }" + ("" if is_last_out else ","))
         lines.append("      );")
 

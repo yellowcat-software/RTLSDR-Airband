@@ -66,6 +66,41 @@ static int parse_outputs(libconfig::Setting& outs, channel_t* channel, int i, in
             }
             channel->outputs[oo].mp3_rate = rate;
         }
+
+        // Per-output dynamic-range compressor. Defaults to disabled; enabling
+        // it normalizes perceived loudness across transmissions with different
+        // modulation depths. Applied to a scratch copy of waveout before
+        // encoding/streaming, so each output of a channel can have its own
+        // settings (or no compression).
+        if (outs[o].exists("compressor")) {
+            libconfig::Setting& cmp = outs[o]["compressor"];
+            const bool enabled = cmp.exists("enabled") ? (bool)cmp["enabled"] : false;
+            if (enabled) {
+                const float threshold_db = cmp.exists("threshold_db") ? (float)cmp["threshold_db"] : -20.0f;
+                const float ratio = cmp.exists("ratio") ? (float)cmp["ratio"] : 4.0f;
+                const float attack_ms = cmp.exists("attack_ms") ? (float)cmp["attack_ms"] : 5.0f;
+                const float release_ms = cmp.exists("release_ms") ? (float)cmp["release_ms"] : 200.0f;
+                const float knee_db = cmp.exists("knee_db") ? (float)cmp["knee_db"] : 6.0f;
+                const float makeup_gain_db = cmp.exists("makeup_gain_db") ? (float)cmp["makeup_gain_db"] : 6.0f;
+                if (ratio < 1.0f || threshold_db > 0.0f || attack_ms <= 0.0f || release_ms <= 0.0f || knee_db < 0.0f || makeup_gain_db < -24.0f || makeup_gain_db > 24.0f) {
+                    if (parsing_mixers) {
+                        cerr << "Configuration error: mixers.[" << i << "] outputs.[" << o << "]: ";
+                    } else {
+                        cerr << "Configuration error: devices.[" << i << "] channels.[" << j << "] outputs.[" << o << "]: ";
+                    }
+                    cerr << "compressor parameters out of range "
+                         << "(threshold_db=" << threshold_db << " ratio=" << ratio << " attack_ms=" << attack_ms << " release_ms=" << release_ms << " knee_db=" << knee_db << " makeup_gain_db=" << makeup_gain_db << ")\n";
+                    error();
+                }
+                if (!strncmp(outs[o]["type"], "rawfile", 7)) {
+                    cerr << "Warning: devices.[" << i << "] channels.[" << j << "] outputs.[" << o << "]: compressor is not applicable to rawfile (raw IQ) outputs; ignoring\n";
+                } else {
+                    const int rate = channel->wave_rate > 0 ? channel->wave_rate : WAVE_RATE;
+                    channel->outputs[oo].compressor = AudioCompressor(rate, threshold_db, ratio, attack_ms, release_ms, knee_db, makeup_gain_db);
+                }
+            }
+        }
+
         if (!strncmp(outs[o]["type"], "icecast", 7)) {
             channel->outputs[oo].data = XCALLOC(1, sizeof(struct icecast_data));
             channel->outputs[oo].type = O_ICECAST;

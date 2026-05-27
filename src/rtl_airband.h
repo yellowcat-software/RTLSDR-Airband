@@ -44,6 +44,7 @@
 #include <pulse/stream.h>
 #endif /* WITH_PULSEAUDIO */
 
+#include "audio_compressor.h"
 #include "demod_coherent.h"
 #include "denoise.h"
 #include "filters.h"
@@ -209,6 +210,12 @@ struct output_t {
     // the wave_rate→mp3_rate conversion. For udp_stream / pulse this matches
     // the device's wave_rate (no resampling).
     int mp3_rate;
+
+    // Optional per-output dynamic-range compressor; runs on a scratch copy of
+    // `channel->waveout` before encoding/streaming. Disabled by default.
+    AudioCompressor compressor;
+    float* compressor_scratch;    // length channel->wave_batch when enabled, else nullptr
+    float* compressor_scratch_r;  // stereo right-channel scratch when needed
 
     // lame encoder and buffer for mp3 output. initialized after config parsing
     // if `uses_mp3_output` is true
